@@ -31,19 +31,21 @@
 #include <err.h>
 #include <smem.h>
 #include <msm_panel.h>
+#include <target.h>
 #include <string.h>
 #include <stdlib.h>
 #include <board.h>
 #include <mdp5.h>
 #include <platform/gpio.h>
 #include <mipi_dsi.h>
+#include <platform/msm_shared/timer.h>
 
-#include "include/display_resource.h"
-#include "include/panel.h"
-#include "panel_display.h"
-#include "gcdb_display.h"
-#include "target/display.h"
-#include "gcdb_autopll.h"
+#include <display_resource.h>
+#include <panel.h>
+#include <panel_display.h>
+#include <gcdb_display.h>
+#include <target/display.h>
+#include <gcdb_autopll.h>
 
 /*---------------------------------------------------------------------------*/
 /* static                                                                    */
@@ -57,7 +59,7 @@ static struct mdss_dsi_phy_ctrl dsi_video_mode_phy_db;
 /* Extern                                                                    */
 /*---------------------------------------------------------------------------*/
 extern int msm_display_init(struct msm_fb_panel_data *pdata);
-extern int msm_display_off();
+extern int msm_display_off(void);
 
 static uint32_t panel_backlight_ctrl(uint8_t enable)
 {
@@ -74,7 +76,7 @@ static uint32_t mdss_dsi_panel_reset(uint8_t enable)
 	return ret;
 }
 
-static uint32_t mdss_dsi_panel_clock(uint8_t enable,
+static int mdss_dsi_panel_clock(int enable,
 				struct msm_panel_info *pinfo)
 {
 	uint32_t ret = NO_ERROR;
@@ -90,12 +92,13 @@ static uint32_t mdss_dsi_panel_clock(uint8_t enable,
 	return ret;
 }
 
-static int mdss_dsi_panel_power(uint8_t enable)
+static int mdss_dsi_panel_power(int enable,
+				struct msm_panel_info *pinfo)
 {
 	int ret = NO_ERROR;
 
 	if (enable) {
-		ret = target_ldo_ctrl(enable);
+		ret = target_ldo_ctrl(enable, pinfo);
 		if (ret) {
 			dprintf(CRITICAL, "LDO control enable failed\n");
 			return ret;
@@ -118,7 +121,7 @@ static int mdss_dsi_panel_power(uint8_t enable)
 			return ret;
 		}
 
-		ret = target_ldo_ctrl(enable);
+		ret = target_ldo_ctrl(enable, pinfo);
 		if (ret) {
 			dprintf(CRITICAL, "ldo control disable failed\n");
 			return ret;
@@ -148,7 +151,7 @@ static int mdss_dsi_panel_pre_init(void)
 	return ret;
 }
 
-static int mdss_dsi_bl_enable(uint8_t enable)
+static int mdss_dsi_bl_enable(int enable)
 {
 	int ret = NO_ERROR;
 
@@ -159,7 +162,7 @@ static int mdss_dsi_bl_enable(uint8_t enable)
 	return ret;
 }
 
-bool gcdb_display_cmdline_arg(char *pbuf, uint16_t buf_size)
+bool gcdb_display_cmdline_arg(char *panel_name, char *pbuf, uint16_t buf_size)
 {
 	char *dsi_id = NULL;
 	char *panel_node = NULL;
@@ -171,28 +174,29 @@ bool gcdb_display_cmdline_arg(char *pbuf, uint16_t buf_size)
 	int panel_mode = SPLIT_DISPLAY_FLAG | DUAL_PIPE_FLAG | DST_SPLIT_FLAG;
 	int prefix_string_len = strlen(DISPLAY_CMDLINE_PREFIX);
 
-	if (panelstruct.paneldata)
-	{
+	if (!strcmp(panel_name, SIM_VIDEO_PANEL)) {
+		dsi_id = SIM_DSI_ID;
+		panel_mode = 0;
+		panel_node = SIM_VIDEO_PANEL_NODE;
+	}  else if (!strcmp(panel_name, SIM_DUALDSI_VIDEO_PANEL)) {
+		dsi_id = SIM_DSI_ID;
+		panel_mode = 1;
+		panel_node = SIM_DUALDSI_VIDEO_PANEL_NODE;
+		slave_panel_node = SIM_DUALDSI_VIDEO_SLAVE_PANEL_NODE;
+	} else if (panelstruct.paneldata && target_cont_splash_screen()) {
 		dsi_id = panelstruct.paneldata->panel_controller;
 		panel_node = panelstruct.paneldata->panel_node_id;
 		panel_mode = panelstruct.paneldata->panel_operating_mode &
 							panel_mode;
 		slave_panel_node = panelstruct.paneldata->slave_panel_node_id;
-	}
-	else
-	{
+	} else {
 		if (target_is_edp())
-		{
 			default_str = "0:edp:";
-		}
 		else
-		{
 			default_str = "0:dsi:0:";
-		}
 
 		arg_size = prefix_string_len + strlen(default_str);
-		if (buf_size < arg_size)
-		{
+		if (buf_size < arg_size) {
 			dprintf(CRITICAL, "display command line buffer is small\n");
 			return false;
 		}
@@ -227,13 +231,10 @@ bool gcdb_display_cmdline_arg(char *pbuf, uint16_t buf_size)
 	if (panel_mode)
 		arg_size += DSI_1_STRING_LEN + slave_panel_node_len;
 
-	if (buf_size < arg_size)
-	{
+	if (buf_size < arg_size) {
 		dprintf(CRITICAL, "display command line buffer is small\n");
 		ret = false;
-	}
-	else
-	{
+	} else {
 		strlcpy(pbuf, DISPLAY_CMDLINE_PREFIX, buf_size);
 		pbuf += prefix_string_len;
 		buf_size -= prefix_string_len;
@@ -266,7 +267,7 @@ end:
 }
 
 
-static void init_platform_data()
+static void init_platform_data(void)
 {
 	memcpy(dsi_video_mode_phy_db.regulator, panel_regulator_settings,
 							REGULATOR_SIZE);
@@ -280,13 +281,12 @@ static void init_platform_data()
 
 static void mdss_edp_panel_init(struct msm_panel_info *pinfo)
 {
-	return target_edp_panel_init(pinfo);
+	target_edp_panel_init(pinfo);
 }
 
-static uint32_t mdss_edp_panel_clock(uint8_t enable,
-				struct msm_panel_info *pinfo)
+static int mdss_edp_panel_clock(int enable)
 {
-	return target_edp_panel_clock(enable, pinfo);
+	return target_edp_panel_clock(enable);
 }
 
 static uint32_t mdss_edp_panel_enable(void)
@@ -299,12 +299,13 @@ static uint32_t mdss_edp_panel_disable(void)
 	return target_edp_panel_disable();
 }
 
-static int mdss_edp_panel_power(uint8_t enable)
+static int mdss_edp_panel_power(int enable,
+				struct msm_panel_info *pinfo)
 {
 	int ret = NO_ERROR;
 
 	if (enable) {
-		ret = target_ldo_ctrl(enable);
+		ret = target_ldo_ctrl(enable, pinfo);
 		if (ret) {
 			dprintf(CRITICAL, "LDO control enable failed\n");
 			return ret;
@@ -324,7 +325,7 @@ static int mdss_edp_panel_power(uint8_t enable)
 			return ret;
 		}
 
-		ret = target_ldo_ctrl(enable);
+		ret = target_ldo_ctrl(enable, pinfo);
 		if (ret) {
 			dprintf(CRITICAL, "%s: ldo control disable failed\n", __func__);
 			return ret;
@@ -335,7 +336,7 @@ static int mdss_edp_panel_power(uint8_t enable)
 	return ret;
 }
 
-static int mdss_edp_bl_enable(uint8_t enable)
+static int mdss_edp_bl_enable(int enable)
 {
 	int ret = NO_ERROR;
 
@@ -358,7 +359,7 @@ int gcdb_display_init(const char *panel_name, uint32_t rev, void *base)
 		init_platform_data();
 		if (dsi_panel_init(&(panel.panel_info), &panelstruct)) {
 			dprintf(CRITICAL, "DSI panel init failed!\n");
-			ret = ERROR;
+			ret = ERR_GENERIC;
 			goto error_gcdb_display_init;
 		}
 

@@ -30,6 +30,7 @@
 #include <platform/console.h>
 #include <platform/keyboard.h>
 #include <dev/pci.h>
+#include <dev/uart.h>
 
 extern multiboot_info_t *_multiboot_info;
 extern unsigned int _heap_end;
@@ -43,30 +44,30 @@ void platform_init_mmu_mappings(void)
 void platform_init_multiboot_info(void)
 {
 	unsigned int i;
-	
+
 	if (_multiboot_info) {
 		if (_multiboot_info->flags & MB_INFO_MEM_SIZE) {
 			_heap_end = _multiboot_info->mem_upper * 1024;
 		}
-		
+
 		if (_multiboot_info->flags & MB_INFO_MMAP) {
 			memory_map_t *mmap = (memory_map_t *) (_multiboot_info->mmap_addr - 4);
-			
-			dprintf(DEBUG, "mmap length: %u\n", _multiboot_info->mmap_length);
-			
+
+			dprintf(SPEW, "mmap length: %u\n", _multiboot_info->mmap_length);
+
 			for (i=0; i < _multiboot_info->mmap_length / sizeof(memory_map_t); i++) {
-				dprintf(DEBUG, "base=%08x, length=%08x, type=%02x\n",
-					mmap[i].base_addr_low, mmap[i].length_low, mmap[i].type);
-				
+				dprintf(SPEW, "base=%08x, length=%08x, type=%02x\n",
+				        mmap[i].base_addr_low, mmap[i].length_low, mmap[i].type);
+
 				if (mmap[i].type == MB_MMAP_TYPE_AVAILABLE && mmap[i].base_addr_low >= _heap_end) {
 					_heap_end = mmap[i].base_addr_low + mmap[i].length_low;
 				} else if (mmap[i].type != MB_MMAP_TYPE_AVAILABLE && mmap[i].base_addr_low >= _heap_end) {
-					/* 
+					/*
 					 * break on first memory hole above default heap end for now.
 					 * later we can add facilities for adding free chunks to the
 					 * heap for each segregated memory region.
 					 */
-					 break;
+					break;
 				}
 			}
 		}
@@ -75,12 +76,14 @@ void platform_init_multiboot_info(void)
 
 void platform_early_init(void)
 {
+	platform_init_uart();
+
 	/* update the heap end so we can take advantage of more ram */
 	platform_init_multiboot_info();
-	
+
 	/* get the text console working */
 	platform_init_console();
-	
+
 	/* initialize the interrupt controller */
 	platform_init_interrupts();
 
@@ -90,8 +93,11 @@ void platform_early_init(void)
 
 void platform_init(void)
 {
+	uart_init();
+
 	platform_init_keyboard();
-	
+#ifndef ARCH_X86_64
 	pci_init();
+#endif
 }
 

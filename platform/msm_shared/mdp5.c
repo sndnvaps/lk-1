@@ -30,6 +30,7 @@
 #include <reg.h>
 #include <target/display.h>
 #include <platform/timer.h>
+#include <platform/msm_shared/timer.h>
 #include <platform/iomap.h>
 #include <dev/lcdc.h>
 #include <dev/fbcon.h>
@@ -40,6 +41,9 @@
 #include <clock.h>
 #include <scm.h>
 
+#define MDP_MIN_FETCH		9
+#define MDSS_MDP_MAX_FETCH	12
+
 int restore_secure_cfg(uint32_t id);
 
 static int mdp_rev;
@@ -49,12 +53,12 @@ void mdp_set_revision(int rev)
 	mdp_rev = rev;
 }
 
-int mdp_get_revision()
+int mdp_get_revision(void)
 {
 	return mdp_rev;
 }
 
-uint32_t mdss_mdp_intf_offset()
+uint32_t mdss_mdp_intf_offset(void)
 {
 	uint32_t mdss_mdp_intf_off;
 	uint32_t mdss_mdp_rev = readl(MDP_HW_REV);
@@ -105,6 +109,7 @@ static void mdp_select_pipe_type(struct msm_panel_info *pinfo,
 static void mdss_mdp_set_flush(struct msm_panel_info *pinfo,
 				uint32_t *ctl0_reg_val, uint32_t *ctl1_reg_val)
 {
+	uint32_t mdss_mdp_rev = readl(MDP_HW_REV);
 	switch (pinfo->pipe_type) {
 		case MDSS_MDP_PIPE_TYPE_RGB:
 			*ctl0_reg_val = 0x22048;
@@ -120,6 +125,16 @@ static void mdss_mdp_set_flush(struct msm_panel_info *pinfo,
 			*ctl1_reg_val = 0x24082;
 			break;
 	}
+	/* For targets from MDP v1.5, MDP INTF registers are double buffered */
+	if ((mdss_mdp_rev == MDSS_MDP_HW_REV_106) ||
+		(mdss_mdp_rev == MDSS_MDP_HW_REV_108)) {
+			*ctl0_reg_val |= BIT(30);
+			*ctl1_reg_val |= BIT(31);
+	} else if ((mdss_mdp_rev == MDSS_MDP_HW_REV_105) ||
+		(mdss_mdp_rev == MDSS_MDP_HW_REV_109)) {
+			*ctl0_reg_val |= BIT(30);
+			*ctl1_reg_val |= BIT(29);
+	}
 }
 
 static void mdss_source_pipe_config(struct fbcon_config *fb, struct msm_panel_info
@@ -127,6 +142,7 @@ static void mdss_source_pipe_config(struct fbcon_config *fb, struct msm_panel_in
 {
 	uint32_t src_size, out_size, stride;
 	uint32_t fb_off = 0;
+	uint32_t flip_bits = 0;
 
 	/* write active region size*/
 	src_size = (fb->height << 16) + fb->width;
@@ -141,7 +157,7 @@ static void mdss_source_pipe_config(struct fbcon_config *fb, struct msm_panel_in
 
 	stride = (fb->stride * fb->bpp/8);
 
-	writel(fb->base, pipe_base + PIPE_SSPP_SRC0_ADDR);
+	writel((unsigned)fb->base, pipe_base + PIPE_SSPP_SRC0_ADDR);
 	writel(stride, pipe_base + PIPE_SSPP_SRC_YSTRIDE);
 	writel(src_size, pipe_base + PIPE_SSPP_SRC_IMG_SIZE);
 	writel(out_size, pipe_base + PIPE_SSPP_SRC_SIZE);
@@ -152,10 +168,18 @@ static void mdss_source_pipe_config(struct fbcon_config *fb, struct msm_panel_in
 	/* Tight Packing 3bpp 0-Alpha 8-bit R B G */
 	writel(0x0002243F, pipe_base + PIPE_SSPP_SRC_FORMAT);
 	writel(0x00020001, pipe_base + PIPE_SSPP_SRC_UNPACK_PATTERN);
-	writel(0x00, pipe_base + PIPE_SSPP_SRC_OP_MODE);
+
+	/* bit(0) is set if hflip is required.
+	 * bit(1) is set if vflip is required.
+	 */
+	if (pinfo->orientation & 0x1)
+		flip_bits |= MDSS_MDP_OP_MODE_FLIP_LR;
+	if (pinfo->orientation & 0x2)
+		flip_bits |= MDSS_MDP_OP_MODE_FLIP_UD;
+	writel(flip_bits, pipe_base + PIPE_SSPP_SRC_OP_MODE);
 }
 
-static void mdss_vbif_setup()
+static void mdss_vbif_setup(void)
 {
 	int access_secure = restore_secure_cfg(SECURE_DEVICE_MDSS);
 	uint32_t mdp_hw_rev = readl(MDP_HW_REV);
@@ -216,6 +240,67 @@ static uint32_t mdss_smp_alloc(uint32_t client_id, uint32_t smp_cnt,
 	return free_smp_offset;
 }
 
+static void mdp_select_pipe_client_id(struct msm_panel_info *pinfo,
+		uint32_t *left_sspp_client_id, uint32_t *right_sspp_client_id)
+{
+	uint32_t mdss_mdp_rev = readl(MDP_HW_REV);
+	if (MDSS_IS_MAJOR_MINOR_MATCHING(mdss_mdp_rev, MDSS_MDP_HW_REV_101) ||
+		MDSS_IS_MAJOR_MINOR_MATCHING(mdss_mdp_rev, MDSS_MDP_HW_REV_106) ||
+		MDSS_IS_MAJOR_MINOR_MATCHING(mdss_mdp_rev, MDSS_MDP_HW_REV_108)) {
+		switch (pinfo->pipe_type) {
+			case MDSS_MDP_PIPE_TYPE_RGB:
+				*left_sspp_client_id = 0x7; /* 7 */
+				*right_sspp_client_id = 0x11; /* 17 */
+				break;
+			case MDSS_MDP_PIPE_TYPE_DMA:
+				*left_sspp_client_id = 0x4; /* 4 */
+				*right_sspp_client_id = 0xD; /* 13 */
+				break;
+			case MDSS_MDP_PIPE_TYPE_VIG:
+			default:
+				*left_sspp_client_id = 0x1; /* 1 */
+				*right_sspp_client_id = 0x4; /* 4 */
+				break;
+		}
+	} else {
+		switch (pinfo->pipe_type) {
+			case MDSS_MDP_PIPE_TYPE_RGB:
+				*left_sspp_client_id = 0x10; /* 16 */
+				*right_sspp_client_id = 0x11; /* 17 */
+				break;
+			case MDSS_MDP_PIPE_TYPE_DMA:
+				*left_sspp_client_id = 0xA; /* 10 */
+				*right_sspp_client_id = 0xD; /* 13 */
+				break;
+			case MDSS_MDP_PIPE_TYPE_VIG:
+			default:
+				*left_sspp_client_id = 0x1; /* 1 */
+				*right_sspp_client_id = 0x4; /* 4 */
+				break;
+		}
+	}
+}
+
+static void mdp_select_pipe_xin_id(struct msm_panel_info *pinfo,
+		uint32_t *left_pipe_xin_id, uint32_t *right_pipe_xin_id)
+{
+	switch (pinfo->pipe_type) {
+		case MDSS_MDP_PIPE_TYPE_RGB:
+			*left_pipe_xin_id = 0x1; /* 1 */
+			*right_pipe_xin_id = 0x5; /* 5 */
+			break;
+		case MDSS_MDP_PIPE_TYPE_DMA:
+			*left_pipe_xin_id = 0x2; /* 2 */
+			*right_pipe_xin_id = 0xA; /* 10 */
+			break;
+		case MDSS_MDP_PIPE_TYPE_VIG:
+		default:
+			*left_pipe_xin_id = 0x0; /* 0 */
+			*right_pipe_xin_id = 0x4; /* 4 */
+			break;
+	}
+}
+
 static void mdss_smp_setup(struct msm_panel_info *pinfo, uint32_t left_pipe,
 		uint32_t right_pipe)
 
@@ -241,41 +326,8 @@ static void mdss_smp_setup(struct msm_panel_info *pinfo, uint32_t left_pipe,
 			fixed_smp_cnt = 0;
 	}
 
-	if (MDSS_IS_MAJOR_MINOR_MATCHING(mdss_mdp_rev, MDSS_MDP_HW_REV_101) ||
-		MDSS_IS_MAJOR_MINOR_MATCHING(mdss_mdp_rev, MDSS_MDP_HW_REV_106) ||
-		MDSS_IS_MAJOR_MINOR_MATCHING(mdss_mdp_rev, MDSS_MDP_HW_REV_108)) {
-		switch (pinfo->pipe_type) {
-			case MDSS_MDP_PIPE_TYPE_RGB:
-				left_sspp_client_id = 0x7; /* 7 */
-				right_sspp_client_id = 0x11; /* 17 */
-				break;
-			case MDSS_MDP_PIPE_TYPE_DMA:
-				left_sspp_client_id = 0x4; /* 4 */
-				right_sspp_client_id = 0xD; /* 13 */
-				break;
-			case MDSS_MDP_PIPE_TYPE_VIG:
-			default:
-				left_sspp_client_id = 0x1; /* 1 */
-				right_sspp_client_id = 0x4; /* 4 */
-				break;
-		}
-	} else {
-		switch (pinfo->pipe_type) {
-			case MDSS_MDP_PIPE_TYPE_RGB:
-				left_sspp_client_id = 0x10; /* 16 */
-				right_sspp_client_id = 0x11; /* 17 */
-				break;
-			case MDSS_MDP_PIPE_TYPE_DMA:
-				left_sspp_client_id = 0xA; /* 10 */
-				right_sspp_client_id = 0xD; /* 13 */
-				break;
-			case MDSS_MDP_PIPE_TYPE_VIG:
-			default:
-				left_sspp_client_id = 0x1; /* 1 */
-				right_sspp_client_id = 0x4; /* 4 */
-				break;
-		}
-	}
+	mdp_select_pipe_client_id(pinfo,
+			&left_sspp_client_id, &right_sspp_client_id);
 
 	/* Each pipe driving half the screen */
 	if (pinfo->lcdc.dual_pipe)
@@ -308,15 +360,16 @@ static void mdss_smp_setup(struct msm_panel_info *pinfo, uint32_t left_pipe,
 			free_smp_offset);
 }
 
-void mdss_intf_tg_setup(struct msm_panel_info *pinfo, uint32_t intf_base)
+int mdss_intf_tg_setup(struct msm_panel_info *pinfo, uint32_t intf_base)
 {
 	uint32_t hsync_period, vsync_period;
 	uint32_t hsync_start_x, hsync_end_x;
-	uint32_t display_hctl, active_hctl, hsync_ctl, display_vstart, display_vend;
+	uint32_t display_hctl, hsync_ctl, display_vstart, display_vend;
 	uint32_t mdss_mdp_intf_off;
 	uint32_t adjust_xres = 0;
 
 	struct lcdc_panel_info *lcdc = NULL;
+	struct intf_timing_params itp = {0};
 
 	if (pinfo == NULL)
 		return ERR_INVALID_ARGS;
@@ -340,41 +393,58 @@ void mdss_intf_tg_setup(struct msm_panel_info *pinfo, uint32_t intf_base)
 		writel(BIT(5), MDP_REG_PPB0_CNTL);
 	}
 
+	if (!pinfo->fbc.enabled || !pinfo->fbc.comp_ratio)
+		pinfo->fbc.comp_ratio = 1;
+
+	itp.xres = (adjust_xres / pinfo->fbc.comp_ratio);
+	itp.yres = pinfo->yres;
+	itp.width =((adjust_xres + pinfo->lcdc.xres_pad) / pinfo->fbc.comp_ratio);
+	itp.height = pinfo->yres + pinfo->lcdc.yres_pad;
+	itp.h_back_porch = pinfo->lcdc.h_back_porch;
+	itp.h_front_porch = pinfo->lcdc.h_front_porch;
+	itp.v_back_porch =  pinfo->lcdc.v_back_porch;
+	itp.v_front_porch = pinfo->lcdc.v_front_porch;
+	itp.hsync_pulse_width = pinfo->lcdc.h_pulse_width;
+	itp.vsync_pulse_width = pinfo->lcdc.v_pulse_width;
+
+	itp.border_clr = pinfo->lcdc.border_clr;
+	itp.underflow_clr = pinfo->lcdc.underflow_clr;
+	itp.hsync_skew = pinfo->lcdc.hsync_skew;
+
+
 	mdss_mdp_intf_off = intf_base + mdss_mdp_intf_offset();
 
-	hsync_period = lcdc->h_pulse_width +
-		lcdc->h_back_porch +
-		adjust_xres + lcdc->xres_pad + lcdc->h_front_porch;
-	vsync_period = (lcdc->v_pulse_width +
-			lcdc->v_back_porch +
-			pinfo->yres + lcdc->yres_pad +
-			lcdc->v_front_porch);
+	hsync_period = itp.hsync_pulse_width + itp.h_back_porch +
+			itp.width + itp.h_front_porch;
+
+	vsync_period = itp.vsync_pulse_width + itp.v_back_porch +
+			itp.height + itp.v_front_porch;
 
 	hsync_start_x =
-		lcdc->h_pulse_width +
-		lcdc->h_back_porch;
+		itp.hsync_pulse_width +
+		itp.h_back_porch;
 	hsync_end_x =
-		hsync_period - lcdc->h_front_porch - 1;
+		hsync_period - itp.h_front_porch - 1;
 
-	display_vstart = (lcdc->v_pulse_width +
-			lcdc->v_back_porch)
-		* hsync_period + lcdc->hsync_skew;
-	display_vend = ((vsync_period - lcdc->v_front_porch) * hsync_period)
-		+lcdc->hsync_skew - 1;
+	display_vstart = (itp.vsync_pulse_width +
+			itp.v_back_porch)
+		* hsync_period + itp.hsync_skew;
+	display_vend = ((vsync_period - itp.v_front_porch) * hsync_period)
+		+ itp.hsync_skew - 1;
 
 	if (intf_base == MDP_INTF_0_BASE) { /* eDP */
-		display_vstart += lcdc->h_pulse_width + lcdc->h_back_porch;
-		display_vend -= lcdc->h_front_porch;
+		display_vstart += itp.hsync_pulse_width + itp.h_back_porch;
+		display_vend -= itp.h_front_porch;
 	}
 
-	hsync_ctl = (hsync_period << 16) | lcdc->h_pulse_width;
+	hsync_ctl = (hsync_period << 16) | itp.hsync_pulse_width;
 	display_hctl = (hsync_end_x << 16) | hsync_start_x;
 
 	writel(hsync_ctl, MDP_HSYNC_CTL + mdss_mdp_intf_off);
 	writel(vsync_period*hsync_period, MDP_VSYNC_PERIOD_F0 +
 			mdss_mdp_intf_off);
 	writel(0x00, MDP_VSYNC_PERIOD_F1 + mdss_mdp_intf_off);
-	writel(lcdc->v_pulse_width*hsync_period,
+	writel(itp.vsync_pulse_width*hsync_period,
 			MDP_VSYNC_PULSE_WIDTH_F0 +
 			mdss_mdp_intf_off);
 	writel(0x00, MDP_VSYNC_PULSE_WIDTH_F1 + mdss_mdp_intf_off);
@@ -396,6 +466,65 @@ void mdss_intf_tg_setup(struct msm_panel_info *pinfo, uint32_t intf_base)
 		writel(0x212A, MDP_PANEL_FORMAT + mdss_mdp_intf_off);
 	else
 		writel(0x213F, MDP_PANEL_FORMAT + mdss_mdp_intf_off);
+
+	return NO_ERROR;
+}
+
+void mdss_intf_fetch_start_config(struct msm_panel_info *pinfo,
+					uint32_t intf_base)
+{
+	uint32_t mdp_hw_rev = readl(MDP_HW_REV);
+	uint32_t mdss_mdp_intf_off;
+	uint32_t v_total, h_total, fetch_start, vfp_start, fetch_lines;
+	uint32_t adjust_xres = 0;
+
+	struct lcdc_panel_info *lcdc = NULL;
+
+	if (pinfo == NULL)
+		return;
+
+	lcdc =  &(pinfo->lcdc);
+	if (lcdc == NULL)
+		return;
+
+	/*
+	 * MDP programmable fetch is for MDP with rev >= 1.05.
+	 * Programmable fetch is not needed if vertical back porch
+	 * is >= 9.
+	 */
+	if (mdp_hw_rev < MDSS_MDP_HW_REV_105 ||
+			lcdc->v_back_porch >= MDP_MIN_FETCH)
+		return;
+
+	mdss_mdp_intf_off = intf_base + mdss_mdp_intf_offset();
+
+	adjust_xres = pinfo->xres;
+	if (pinfo->lcdc.split_display)
+		adjust_xres /= 2;
+
+	/*
+	 * Fetch should always be outside the active lines. If the fetching
+	 * is programmed within active region, hardware behavior is unknown.
+	 */
+	v_total = lcdc->v_pulse_width + lcdc->v_back_porch + pinfo->yres +
+							lcdc->v_front_porch;
+	h_total = lcdc->h_pulse_width + lcdc->h_back_porch + adjust_xres +
+							lcdc->h_front_porch;
+	vfp_start = lcdc->v_pulse_width + lcdc->v_back_porch + pinfo->yres;
+
+	fetch_lines = v_total - vfp_start;
+
+	/*
+	 * In some cases, vertical front porch is too high. In such cases limit
+	 * the mdp fetch lines  as the last 12 lines of vertical front porch.
+	 */
+	if (fetch_lines > MDSS_MDP_MAX_FETCH)
+		fetch_lines = MDSS_MDP_MAX_FETCH;
+
+	fetch_start = (v_total - fetch_lines) * h_total + 1;
+
+	writel(fetch_start, MDP_PROG_FETCH_START + mdss_mdp_intf_off);
+	writel(BIT(31), MDP_INTF_CONFIG + mdss_mdp_intf_off);
 }
 
 void mdss_layer_mixer_setup(struct fbcon_config *fb, struct msm_panel_info
@@ -463,6 +592,57 @@ void mdss_layer_mixer_setup(struct fbcon_config *fb, struct msm_panel_info
 	}
 }
 
+void mdss_fbc_cfg(struct msm_panel_info *pinfo)
+{
+	uint32_t mode = 0;
+	uint32_t budget_ctl = 0;
+	uint32_t lossy_mode = 0;
+	uint32_t xres;
+	struct fbc_panel_info *fbc;
+	uint32_t enc_mode;
+
+	fbc = &pinfo->fbc;
+	xres = pinfo->xres;
+
+	if (!pinfo->fbc.enabled)
+		return;
+
+	if (pinfo->mipi.dual_dsi)
+		xres /= 2;
+
+	/* enc_mode defines FBC version. 0 = FBC 1.0 and 1 = FBC 2.0 */
+	enc_mode = (fbc->comp_ratio == 2) ? 0 : 1;
+
+	mode = ((xres) << 16) | (enc_mode) << 9 | ((fbc->comp_mode) << 8) |
+		((fbc->qerr_enable) << 7) | ((fbc->cd_bias) << 4) |
+		((fbc->pat_enable) << 3) | ((fbc->vlc_enable) << 2) |
+		((fbc->bflc_enable) << 1) | 1;
+
+	dprintf(SPEW, "xres = %d, comp_mode %d, qerr_enable = %d, cd_bias = %d\n",
+			xres, fbc->comp_mode, fbc->qerr_enable, fbc->cd_bias);
+	dprintf(SPEW, "pat_enable %d, vlc_enable = %d, bflc_enable = %d\n",
+			fbc->pat_enable, fbc->vlc_enable, fbc->bflc_enable);
+
+	budget_ctl = ((fbc->line_x_budget) << 12) |
+		((fbc->block_x_budget) << 8) | fbc->block_budget;
+
+	lossy_mode = ((fbc->lossless_mode_thd) << 16) |
+		((fbc->lossy_mode_thd) << 8) |
+		((fbc->lossy_rgb_thd) << 4) | fbc->lossy_mode_idx;
+
+	writel(mode, MDP_PP_0_BASE + MDSS_MDP_REG_PP_FBC_MODE);
+	writel(budget_ctl, MDP_PP_0_BASE + MDSS_MDP_REG_PP_FBC_BUDGET_CTL);
+	writel(lossy_mode, MDP_PP_0_BASE + MDSS_MDP_REG_PP_FBC_LOSSY_MODE);
+
+	if (pinfo->mipi.dual_dsi) {
+		writel(mode, MDP_PP_1_BASE + MDSS_MDP_REG_PP_FBC_MODE);
+		writel(budget_ctl, MDP_PP_1_BASE +
+				MDSS_MDP_REG_PP_FBC_BUDGET_CTL);
+		writel(lossy_mode, MDP_PP_1_BASE +
+				MDSS_MDP_REG_PP_FBC_LOSSY_MODE);
+	}
+}
+
 void mdss_qos_remapper_setup(void)
 {
 	uint32_t mdp_hw_rev = readl(MDP_HW_REV);
@@ -479,14 +659,60 @@ void mdss_qos_remapper_setup(void)
 			MDSS_MDP_HW_REV_106) ||
 		 MDSS_IS_MAJOR_MINOR_MATCHING(mdp_hw_rev,
 			MDSS_MDP_HW_REV_108))
-		map = 0xAA;
+		map = 0xE4;
 	else if (MDSS_IS_MAJOR_MINOR_MATCHING(mdp_hw_rev,
-						MDSS_MDP_HW_REV_103))
+			MDSS_MDP_HW_REV_105) ||
+		 MDSS_IS_MAJOR_MINOR_MATCHING(mdp_hw_rev,
+			MDSS_MDP_HW_REV_109))
+		map = 0xA4;
+	else if (MDSS_IS_MAJOR_MINOR_MATCHING(mdp_hw_rev,
+			MDSS_MDP_HW_REV_103))
 		map = 0xFA;
 	else
 		return;
 
 	writel(map, MDP_QOS_REMAPPER_CLASS_0);
+}
+
+void mdss_vbif_qos_remapper_setup(struct msm_panel_info *pinfo)
+{
+	uint32_t mask, reg_val, i;
+	uint32_t left_pipe_xin_id, right_pipe_xin_id;
+	uint32_t mdp_hw_rev = readl(MDP_HW_REV);
+	uint32_t vbif_qos[4] = {0, 0, 0, 0};
+
+	mdp_select_pipe_xin_id(pinfo,
+			&left_pipe_xin_id, &right_pipe_xin_id);
+
+	if (MDSS_IS_MAJOR_MINOR_MATCHING(mdp_hw_rev, MDSS_MDP_HW_REV_106) ||
+		 MDSS_IS_MAJOR_MINOR_MATCHING(mdp_hw_rev, MDSS_MDP_HW_REV_108)) {
+		vbif_qos[0] = 2;
+		vbif_qos[1] = 2;
+		vbif_qos[2] = 2;
+		vbif_qos[3] = 2;
+	} else if (MDSS_IS_MAJOR_MINOR_MATCHING(mdp_hw_rev, MDSS_MDP_HW_REV_105) ||
+		 MDSS_IS_MAJOR_MINOR_MATCHING(mdp_hw_rev, MDSS_MDP_HW_REV_109)) {
+		vbif_qos[0] = 1;
+		vbif_qos[1] = 2;
+		vbif_qos[2] = 2;
+		vbif_qos[3] = 2;
+	} else {
+		return;
+	}
+
+	for (i = 0; i < 4; i++) {
+		reg_val = readl(VBIF_VBIF_QOS_REMAP_00 + i*4);
+		mask = 0x3 << (left_pipe_xin_id * 2);
+		reg_val &= ~(mask);
+		reg_val |= vbif_qos[i] << (left_pipe_xin_id * 2);
+
+		if (pinfo->lcdc.dual_pipe) {
+			mask = 0x3 << (right_pipe_xin_id * 2);
+			reg_val &= ~(mask);
+			reg_val |= vbif_qos[i] << (right_pipe_xin_id * 2);
+		}
+		writel(reg_val, VBIF_VBIF_QOS_REMAP_00 + i*4);
+	}
 }
 
 static uint32_t mdss_mdp_ctl_out_sel(struct msm_panel_info *pinfo,
@@ -509,15 +735,17 @@ int mdp_dsi_video_config(struct msm_panel_info *pinfo,
 		struct fbcon_config *fb)
 {
 	int ret = NO_ERROR;
-	struct lcdc_panel_info *lcdc = NULL;
 	uint32_t intf_sel = 0x100;
 	uint32_t left_pipe, right_pipe;
 	uint32_t reg;
 
 	mdss_intf_tg_setup(pinfo, MDP_INTF_1_BASE);
+	mdss_intf_fetch_start_config(pinfo, MDP_INTF_1_BASE);
 
-	if (pinfo->mipi.dual_dsi)
+	if (pinfo->mipi.dual_dsi) {
 		mdss_intf_tg_setup(pinfo, MDP_INTF_2_BASE);
+		mdss_intf_fetch_start_config(pinfo, MDP_INTF_2_BASE);
+	}
 
 	mdp_clk_gating_ctrl();
 
@@ -526,6 +754,7 @@ int mdp_dsi_video_config(struct msm_panel_info *pinfo,
 	mdss_smp_setup(pinfo, left_pipe, right_pipe);
 
 	mdss_qos_remapper_setup();
+	mdss_vbif_qos_remapper_setup(pinfo);
 
 	mdss_source_pipe_config(fb, pinfo, left_pipe);
 
@@ -540,6 +769,8 @@ int mdp_dsi_video_config(struct msm_panel_info *pinfo,
 	/*If dst_split is enabled only intf 2 needs to be enabled.
 	CTL_1 path should not be set since CTL_0 itself is going
 	to split after DSPP block*/
+	if (pinfo->fbc.enabled)
+		mdss_fbc_cfg(pinfo);
 
 	if (pinfo->mipi.dual_dsi) {
 		if (!pinfo->lcdc.dst_split) {
@@ -555,13 +786,12 @@ int mdp_dsi_video_config(struct msm_panel_info *pinfo,
 	writel(0x01, MDP_UPPER_NEW_ROI_PRIOR_RO_START);
 	writel(0x01, MDP_LOWER_NEW_ROI_PRIOR_TO_START);
 
-	return 0;
+	return ret;
 }
 
 int mdp_edp_config(struct msm_panel_info *pinfo, struct fbcon_config *fb)
 {
 	int ret = NO_ERROR;
-	struct lcdc_panel_info *lcdc = NULL;
 	uint32_t left_pipe, right_pipe;
 
 	mdss_intf_tg_setup(pinfo, MDP_INTF_0_BASE);
@@ -573,6 +803,7 @@ int mdp_edp_config(struct msm_panel_info *pinfo, struct fbcon_config *fb)
 	mdss_smp_setup(pinfo, left_pipe, right_pipe);
 
 	mdss_qos_remapper_setup();
+	mdss_vbif_qos_remapper_setup(pinfo);
 
 	mdss_source_pipe_config(fb, pinfo, left_pipe);
 	if (pinfo->lcdc.dual_pipe)
@@ -590,7 +821,41 @@ int mdp_edp_config(struct msm_panel_info *pinfo, struct fbcon_config *fb)
 	writel(0x01, MDP_UPPER_NEW_ROI_PRIOR_RO_START);
 	writel(0x01, MDP_LOWER_NEW_ROI_PRIOR_TO_START);
 
-	return 0;
+	return ret;
+}
+
+int mdss_hdmi_config(struct msm_panel_info *pinfo, struct fbcon_config *fb)
+{
+	int ret = NO_ERROR;
+	uint32_t left_pipe, right_pipe;
+
+	mdss_intf_tg_setup(pinfo, MDP_INTF_3_BASE);
+	mdp_select_pipe_type(pinfo, &left_pipe, &right_pipe);
+
+	mdp_clk_gating_ctrl();
+	mdss_vbif_setup();
+
+	mdss_smp_setup(pinfo, left_pipe, right_pipe);
+
+	mdss_qos_remapper_setup();
+
+	mdss_source_pipe_config(fb, pinfo, left_pipe);
+	if (pinfo->lcdc.dual_pipe)
+		mdss_source_pipe_config(fb, pinfo, right_pipe);
+
+	mdss_layer_mixer_setup(fb, pinfo);
+
+	if (pinfo->lcdc.dual_pipe)
+		writel(0x181F40, MDP_CTL_0_BASE + CTL_TOP);
+	else
+		writel(0x40, MDP_CTL_0_BASE + CTL_TOP);
+
+	writel(BIT(24) | BIT(25), MDP_DISP_INTF_SEL);
+	writel(0x1111, MDP_VIDEO_INTF_UNDERFLOW_CTL);
+	writel(0x01, MDP_UPPER_NEW_ROI_PRIOR_RO_START);
+	writel(0x01, MDP_LOWER_NEW_ROI_PRIOR_TO_START);
+
+	return ret;
 }
 
 int mdp_dsi_cmd_config(struct msm_panel_info *pinfo,
@@ -635,6 +900,7 @@ int mdp_dsi_cmd_config(struct msm_panel_info *pinfo,
 	mdss_vbif_setup();
 	mdss_smp_setup(pinfo, left_pipe, right_pipe);
 	mdss_qos_remapper_setup();
+	mdss_vbif_qos_remapper_setup(pinfo);
 
 	mdss_source_pipe_config(fb, pinfo, left_pipe);
 
@@ -646,6 +912,9 @@ int mdp_dsi_cmd_config(struct msm_panel_info *pinfo,
 	writel(0x213F, MDP_INTF_1_BASE + MDP_PANEL_FORMAT + mdss_mdp_intf_off);
 	reg = 0x21f00 | mdss_mdp_ctl_out_sel(pinfo, 1);
 	writel(reg, MDP_CTL_0_BASE + CTL_TOP);
+
+	if (pinfo->fbc.enabled)
+		mdss_fbc_cfg(pinfo);
 
 	if (pinfo->mipi.dual_dsi) {
 		writel(0x213F, MDP_INTF_2_BASE + MDP_PANEL_FORMAT + mdss_mdp_intf_off);
@@ -667,7 +936,7 @@ int mdp_dsi_video_on(struct msm_panel_info *pinfo)
 	return NO_ERROR;
 }
 
-int mdp_dsi_video_off()
+int mdp_dsi_video_off(void)
 {
 	if(!target_cont_splash_screen())
 	{
@@ -684,7 +953,7 @@ int mdp_dsi_video_off()
 	return NO_ERROR;
 }
 
-int mdp_dsi_cmd_off()
+int mdp_dsi_cmd_off(void)
 {
 	if(!target_cont_splash_screen())
 	{
@@ -718,6 +987,18 @@ int mdp_edp_on(struct msm_panel_info *pinfo)
 	mdss_mdp_set_flush(pinfo, &ctl0_reg_val, &ctl1_reg_val);
 	writel(ctl0_reg_val, MDP_CTL_0_BASE + CTL_FLUSH);
 	writel(0x01, MDP_INTF_0_TIMING_ENGINE_EN  + mdss_mdp_intf_offset());
+	return NO_ERROR;
+}
+
+int mdss_hdmi_on(struct msm_panel_info *pinfo)
+{
+	uint32_t ctl0_reg_val, ctl1_reg_val;
+
+	mdss_mdp_set_flush(pinfo, &ctl0_reg_val, &ctl1_reg_val);
+	writel(ctl0_reg_val, MDP_CTL_0_BASE + CTL_FLUSH);
+
+	writel(0x01, MDP_INTF_3_TIMING_ENGINE_EN + mdss_mdp_intf_offset());
+
 	return NO_ERROR;
 }
 

@@ -29,6 +29,7 @@
 #include <bam.h>
 #include <reg.h>
 #include <debug.h>
+#include <assert.h>
 #include <stdlib.h>
 #include <arch/ops.h>
 #include <platform.h>
@@ -79,7 +80,6 @@ int bam_wait_for_interrupt(struct bam_instance *bam,
                            enum p_int_type interrupt)
 {
 	uint32_t val;
-	uint32_t bamsts;
 
 	while (1)
 	{
@@ -89,14 +89,6 @@ int bam_wait_for_interrupt(struct bam_instance *bam,
 			val = readl(BAM_IRQ_SRCS(bam->base, bam->ee));
 			/* Flush out the right most global interrupt bit */
 		} while (!((val & 0x7FFF) & (1 << bam->pipe[pipe_num].pipe_num)));
-
-		/* Check the reason for this BAM interrupt */
-		bamsts = readl(BAM_IRQ_STTS(bam->base));
-		if (bamsts)
-		{
-			dprintf(CRITICAL,"ERROR:BAM_IRQ_STTS %u \n", bamsts);
-			goto bam_wait_int_error;
-		}
 
 		/* Check the interrupt type */
 		/* Read interrupt status register */

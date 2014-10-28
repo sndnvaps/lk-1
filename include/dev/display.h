@@ -23,7 +23,7 @@
 #ifndef __DEV_DISPLAY_H
 #define __DEV_DISPLAY_H
 
-#include <sys/types.h>
+#include <stdbool.h>
 #include <lib/gfx.h>
 
 int display_init(void *framebuffer);
@@ -38,7 +38,7 @@ struct display_info {
 	uint height;
 	uint stride;
 
-	// Update function	
+	// Update function
 	void (*flush)(uint starty, uint endy);
 };
 

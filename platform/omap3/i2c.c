@@ -21,6 +21,7 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #include <debug.h>
+#include <trace.h>
 #include <err.h>
 #include <reg.h>
 #include <string.h>
@@ -61,7 +62,7 @@ static void i2c_reset_bus(int bus)
 
 	/* set up the clock */
 	I2C_REG(bus, I2C_PSC) = 23; // 96Mhz / 23 == 4Mhz
-	I2C_REG(bus, I2C_SCLL) = 13; 
+	I2C_REG(bus, I2C_SCLL) = 13;
 	I2C_REG(bus, I2C_SCLH) = 15; // 4Mhz / combined divider of 40 (13+7 + 15+5) == 100khz
 
 	/* slave address */
@@ -91,17 +92,17 @@ int i2c_transmit(int bus, uint8_t address, const void *buf, size_t count)
 	int err;
 
 	LTRACEF("bus %d, address 0x%hhx, buf %p, count %zd\n", bus, address, buf, count);
-		
+
 	i2c_wait_for_bb(bus);
 
 	I2C_REG(bus, I2C_SA) = address;
 	I2C_REG(bus, I2C_CNT) = count;
 	I2C_REG(bus, I2C_CON) = (1<<15)|(1<<10)|(1<<9)|(1<<1)|(1<<0); // enable, master, transmit, STP, STT
 
-	time_t t = current_time();
+	lk_time_t t = current_time();
 
 	const uint8_t *ptr = (const uint8_t *)buf;
-	for(;;) {
+	for (;;) {
 		uint16_t stat = I2C_REG(bus, I2C_STAT);
 		if (stat & (1<<1)) {
 			// NACK
@@ -151,17 +152,17 @@ int i2c_receive(int bus, uint8_t address, void *buf, size_t count)
 	int err;
 
 	LTRACEF("bus %d, address 0x%hhx, buf %p, count %zd\n", bus, address, buf, count);
-		
+
 	i2c_wait_for_bb(bus);
 
 	I2C_REG(bus, I2C_SA) = address;
 	I2C_REG(bus, I2C_CNT) = count;
 	I2C_REG(bus, I2C_CON) = (1<<15)|(1<<10)|(1<<1)|(1<<0); // enable, master, STP, STT
 
-	time_t t = current_time();
+	lk_time_t t = current_time();
 
 	uint8_t *ptr = (uint8_t *)buf;
-	for(;;) {
+	for (;;) {
 		uint16_t stat = I2C_REG(bus, I2C_STAT);
 		if (stat & (1<<1)) {
 			// NACK

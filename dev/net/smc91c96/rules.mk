@@ -1,8 +1,11 @@
 LOCAL_DIR := $(GET_LOCAL_DIR)
 
-INCLUDES += \
-	-I$(LOCAL_DIR)/include
+MODULE := $(LOCAL_DIR)
 
-OBJS += \
-	$(LOCAL_DIR)/smc91c96.o
+GLOBAL_INCLUDES += \
+	$(LOCAL_DIR)/include
 
+MODULE_SRCS += \
+	$(LOCAL_DIR)/smc91c96.c
+
+include make/module.mk

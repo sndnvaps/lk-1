@@ -24,12 +24,13 @@
 #include <string.h>
 #include <lib/console.h>
 #include <lib/fs.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <platform.h>
 
 #if defined(WITH_LIB_CONSOLE)
 
-#if DEBUGLEVEL > 1
+#if LK_DEBUGLEVEL > 1
 static int cmd_fs(int argc, const cmd_args *argv);
 
 STATIC_COMMAND_START
@@ -218,7 +219,7 @@ usage:
 			return err;
 		}
 
-		printf("stat successful:\n");		
+		printf("stat successful:\n");
 		printf("\tis_dir: %d\n", stat.is_dir ? 1 : 0);
 		printf("\tsize: %lld\n", stat.size);
 

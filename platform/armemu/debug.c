@@ -22,17 +22,17 @@
  */
 #include <stdarg.h>
 #include <reg.h>
-#include <printf.h>
+#include <stdio.h>
 #include <kernel/thread.h>
 #include <platform/armemu/memmap.h>
 #include <platform/debug.h>
 
-void _dputc(char c)
+void platform_dputc(char c)
 {
 	*REG8(DEBUG_STDOUT) = c;
 }
 
-int dgetc(char *c, bool wait)
+int platform_dgetc(char *c, bool wait)
 {
 	for (;;) {
 		int8_t result = (int8_t)*REG8(DEBUG_STDIN);
@@ -57,7 +57,7 @@ void debug_dump_regs(void)
 void platform_halt(void)
 {
 	*REG32(DEBUG_HALT) = 1;
-	for(;;);
+	for (;;);
 }
 
 void debug_dump_memory_bytes(void *mem, int len)
@@ -87,13 +87,13 @@ void debug_dump_memory_words(void *mem, int len)
 
 void debug_set_trace_level(int trace_type, int level)
 {
-	if(trace_type < 0 || trace_type >= 4)
+	if (trace_type < 0 || trace_type >= 4)
 		return;
 
 	*REG32(DEBUG_SET_TRACELEVEL_CPU + trace_type * 4) = level;
 }
 
-uint32_t debug_cycle_count()
+uint32_t debug_cycle_count(void)
 {
 	return *REG32(DEBUG_CYCLE_COUNT);
 }

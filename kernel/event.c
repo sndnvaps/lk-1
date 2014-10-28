@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2009 Travis Geiselbrecht
+ * Copyright (c) 2008-2013 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -41,12 +41,9 @@
  */
 
 #include <debug.h>
+#include <assert.h>
 #include <err.h>
 #include <kernel/event.h>
-
-#if DEBUGLEVEL > 1
-#define EVENT_CHECK 1
-#endif
 
 /**
  * @brief  Initialize an event object
@@ -57,14 +54,7 @@
  */
 void event_init(event_t *e, bool initial, uint flags)
 {
-#if EVENT_CHECK
-//	ASSERT(e->magic != EVENT_MAGIC);
-#endif
-
-	e->magic = EVENT_MAGIC;
-	e->signalled = initial;
-	e->flags = flags;
-	wait_queue_init(&e->wait);
+	*e = (event_t)EVENT_INITIAL_VALUE(*e, initial, flags);
 }
 
 /**
@@ -78,11 +68,9 @@ void event_init(event_t *e, bool initial, uint flags)
  */
 void event_destroy(event_t *e)
 {
-	enter_critical_section();
+	DEBUG_ASSERT(e->magic == EVENT_MAGIC);
 
-#if EVENT_CHECK
-	ASSERT(e->magic == EVENT_MAGIC);
-#endif
+	enter_critical_section();
 
 	e->magic = 0;
 	e->signalled = false;
@@ -107,15 +95,13 @@ void event_destroy(event_t *e)
  * @return  0 on success, ERR_TIMED_OUT on timeout,
  *         other values on other errors.
  */
-status_t event_wait_timeout(event_t *e, time_t timeout)
+status_t event_wait_timeout(event_t *e, lk_time_t timeout)
 {
 	status_t ret = NO_ERROR;
 
-	enter_critical_section();
+	DEBUG_ASSERT(e->magic == EVENT_MAGIC);
 
-#if EVENT_CHECK
-	ASSERT(e->magic == EVENT_MAGIC);
-#endif
+	enter_critical_section();
 
 	if (e->signalled) {
 		/* signalled, we're going to fall through */
@@ -137,14 +123,6 @@ err:
 }
 
 /**
- * @brief  Same as event_wait_timeout(), but without a timeout.
- */
-status_t event_wait(event_t *e)
-{
-	return event_wait_timeout(e, INFINITE_TIME);
-}
-
-/**
  * @brief  Signal an event
  *
  * Signals an event.  If EVENT_FLAG_AUTOUNSIGNAL is set in the event
@@ -152,7 +130,7 @@ status_t event_wait(event_t *e)
  * all waiting threads are allowed to proceed until such time as
  * event_unsignal() is called.
  *
- * @param e	          Event object
+ * @param e           Event object
  * @param reschedule  If true, waiting thread(s) are executed immediately,
  *                    and the current thread resumes only after the
  *                    waiting threads have been satisfied. If false,
@@ -163,11 +141,9 @@ status_t event_wait(event_t *e)
  */
 status_t event_signal(event_t *e, bool reschedule)
 {
-	enter_critical_section();
+	DEBUG_ASSERT(e->magic == EVENT_MAGIC);
 
-#if EVENT_CHECK
-	ASSERT(e->magic == EVENT_MAGIC);
-#endif
+	enter_critical_section();
 
 	if (!e->signalled) {
 		if (e->flags & EVENT_FLAG_AUTOUNSIGNAL) {
@@ -206,15 +182,9 @@ status_t event_signal(event_t *e, bool reschedule)
  */
 status_t event_unsignal(event_t *e)
 {
-	enter_critical_section();
-
-#if EVENT_CHECK
-	ASSERT(e->magic == EVENT_MAGIC);
-#endif
+	DEBUG_ASSERT(e->magic == EVENT_MAGIC);
 
 	e->signalled = false;
-
-	exit_critical_section();
 
 	return NO_ERROR;
 }

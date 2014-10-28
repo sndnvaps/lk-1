@@ -78,8 +78,10 @@
 #define MDSS_MDP_HW_REV_102    MDSS_MDP_REV(1, 2, 0) /* 8974 v2.0 */
 #define MDSS_MDP_HW_REV_102_1  MDSS_MDP_REV(1, 2, 1) /* 8974 v3.0 (Pro) */
 #define MDSS_MDP_HW_REV_103    MDSS_MDP_REV(1, 3, 0) /* 8084 v1.0 */
+#define MDSS_MDP_HW_REV_105    MDSS_MDP_REV(1, 5, 0) /* 8994 v1.0 */
 #define MDSS_MDP_HW_REV_106    MDSS_MDP_REV(1, 6, 0) /* 8916 v1.0 */
 #define MDSS_MDP_HW_REV_108    MDSS_MDP_REV(1, 8, 0) /* 8939 v1.0 */
+#define MDSS_MDP_HW_REV_109    MDSS_MDP_REV(1, 9, 0) /* 8994 v2.0 */
 #define MDSS_MDP_HW_REV_200    MDSS_MDP_REV(2, 0, 0) /* 8092 v1.0 */
 
 #define MDSS_MAX_LINE_BUF_WIDTH 2048
@@ -96,9 +98,13 @@
 
 #define MDP_INTF_0_TIMING_ENGINE_EN             REG_MDP(0x12500)
 #define MDP_INTF_1_TIMING_ENGINE_EN             REG_MDP(0x12700)
+#define MDP_INTF_3_TIMING_ENGINE_EN             REG_MDP(0x12B00)
 
 #define MDP_CTL_0_BASE                          REG_MDP(0x600)
 #define MDP_CTL_1_BASE                          REG_MDP(0x700)
+
+#define MDP_PP_0_BASE                           REG_MDP(0x12D00)
+#define MDP_PP_1_BASE                           REG_MDP(0x12E00)
 
 #define CTL_LAYER_0                             0x00
 #define CTL_LAYER_1                             0x04
@@ -116,7 +122,9 @@
 #define MDP_INTF_0_BASE                         REG_MDP(0x12500)
 #define MDP_INTF_1_BASE                         REG_MDP(0x12700)
 #define MDP_INTF_2_BASE                         REG_MDP(0x12900)
+#define MDP_INTF_3_BASE                         REG_MDP(0x12B00)
 
+#define MDP_INTF_CONFIG                         0x04
 #define MDP_HSYNC_CTL                           0x08
 #define MDP_VSYNC_PERIOD_F0                     0x0C
 #define MDP_VSYNC_PERIOD_F1                     0x10
@@ -134,6 +142,7 @@
 #define MDP_ACTIVE_V_END_F1                     0x38
 #define MDP_UNDERFFLOW_COLOR                    0x48
 #define MDP_PANEL_FORMAT                        0x90
+#define MDP_PROG_FETCH_START                    0x170
 
 #define MDP_CLK_CTRL0                           REG_MDP(0x03AC)
 #define MDP_CLK_CTRL1                           REG_MDP(0x03B4)
@@ -147,9 +156,14 @@
 #define MMSS_MDP_SMP_ALLOC_W_BASE               REG_MDP(0x0180)
 #define MMSS_MDP_SMP_ALLOC_R_BASE               REG_MDP(0x0230)
 
+/* source pipe opmode bits for flip */
+#define MDSS_MDP_OP_MODE_FLIP_UD                BIT(14)
+#define MDSS_MDP_OP_MODE_FLIP_LR                BIT(13)
+
 #define MDP_QOS_REMAPPER_CLASS_0                REG_MDP(0x02E0)
 #define MDP_QOS_REMAPPER_CLASS_1                REG_MDP(0x02E4)
 
+#define VBIF_VBIF_QOS_REMAP_00                  REG_MDP(0xC8020)
 #define VBIF_VBIF_DDR_FORCE_CLK_ON              REG_MDP(0x24004)
 #define VBIF_VBIF_DDR_OUT_MAX_BURST             REG_MDP(0x240D8)
 #define VBIF_VBIF_DDR_ARB_CTRL                  REG_MDP(0x240F0)
@@ -170,8 +184,12 @@
 #define VBIF_VBIF_ABIT_SHORT_CONF               REG_MDP(0x24074)
 #define VBIF_VBIF_GATE_OFF_WRREQ_EN             REG_MDP(0x240A8)
 
+#define MDSS_MDP_REG_PP_FBC_MODE                0x034
+#define MDSS_MDP_REG_PP_FBC_BUDGET_CTL          0x038
+#define MDSS_MDP_REG_PP_FBC_LOSSY_MODE          0x03C
+
 void mdp_set_revision(int rev);
-int mdp_get_revision();
+int mdp_get_revision(void);
 int mdp_dsi_video_config(struct msm_panel_info *pinfo, struct fbcon_config *fb);
 int mipi_dsi_cmd_config(struct fbcon_config mipi_fb_cfg,
 			unsigned short num_of_lanes);

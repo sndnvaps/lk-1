@@ -35,10 +35,11 @@
 #define __DEV_GPIO_KEYPAD_H
 
 #include <sys/types.h>
+#include <stdbool.h>
 
 /* unset: drive active output low, set: drive active output high */
-#define GPIOKPF_ACTIVE_HIGH		(1U << 0)
-#define GPIOKPF_DRIVE_INACTIVE		(1U << 1)
+#define GPIOKPF_ACTIVE_HIGH     (1U << 0)
+#define GPIOKPF_DRIVE_INACTIVE      (1U << 1)
 
 struct gpio_keypad_info {
 	/* size must be ninputs * noutputs */
@@ -48,8 +49,8 @@ struct gpio_keypad_info {
 	int ninputs;
 	int noutputs;
 	/* time to wait before reading inputs after driving each output */
-	time_t settle_time;
-	time_t poll_time;
+	lk_time_t settle_time;
+	lk_time_t poll_time;
 	unsigned flags;
 };
 
@@ -147,11 +148,12 @@ struct qwerty_keypad_info {
 	gpio_get_func  key_gpio_get;
 
 	/* time to wait before reading inputs after driving each output */
-	time_t         settle_time;
-	time_t         poll_time;
+	lk_time_t         settle_time;
+	lk_time_t         poll_time;
 	unsigned       flags;
 };
 
 void ssbi_keypad_init (struct qwerty_keypad_info *);
+void ssbi_gpio_keypad_init(struct qwerty_keypad_info  *qwerty_kp);
 
 #endif /* __DEV_GPIO_KEYPAD_H */

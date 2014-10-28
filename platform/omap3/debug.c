@@ -23,21 +23,21 @@
 #include <stdarg.h>
 #include <reg.h>
 #include <debug.h>
-#include <printf.h>
+#include <stdio.h>
 #include <kernel/thread.h>
 #include <platform/debug.h>
 #include <arch/ops.h>
 #include <dev/uart.h>
 #include <target/debugconfig.h>
 
-void _dputc(char c)
+void platform_dputc(char c)
 {
 	if (c == '\n')
 		uart_putc(DEBUG_UART, '\r');
 	uart_putc(DEBUG_UART, c);
 }
 
-int dgetc(char *c, bool wait)
+int platform_dgetc(char *c, bool wait)
 {
 	int _c;
 
@@ -48,34 +48,9 @@ int dgetc(char *c, bool wait)
 	return 0;
 }
 
-void debug_dump_regs(void)
-{
-	PANIC_UNIMPLEMENTED;
-}
-
 void platform_halt(void)
 {
 	dprintf(ALWAYS, "HALT: spinning forever...\n");
-	for(;;);
-}
-
-void debug_dump_memory_bytes(void *mem, int len)
-{
-	PANIC_UNIMPLEMENTED;
-}
-
-void debug_dump_memory_halfwords(void *mem, int len)
-{
-	PANIC_UNIMPLEMENTED;
-}
-
-void debug_dump_memory_words(void *mem, int len)
-{
-	PANIC_UNIMPLEMENTED;
-}
-
-void debug_set_trace_level(int trace_type, int level)
-{
-	PANIC_UNIMPLEMENTED;
+	for (;;);
 }
 

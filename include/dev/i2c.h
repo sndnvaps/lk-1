@@ -23,6 +23,8 @@
 #ifndef __DEV_I2C_H
 #define __DEV_I2C_H
 
+#include <stdint.h>
+
 void i2c_init(void);
 void i2c_init_early(void);
 
@@ -33,7 +35,7 @@ int i2c_receive(int bus, uint8_t address, void *buf, size_t count);
 /* a few convenience routines based on the usual way of accessing 8 byte registers on i2c slave devices */
 int i2c_write_reg(int bus, uint8_t address, uint8_t reg, uint8_t val);
 int i2c_read_reg(int bus, uint8_t address, uint8_t reg, uint8_t *val);
-	
+
 
 #endif
 

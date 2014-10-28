@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Travis Geiselbrecht
+ * Copyright (c) 2008-2013 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -21,11 +21,14 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #include <debug.h>
+#include <trace.h>
 #include <err.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <dev/usbc.h>
 #include <dev/usb.h>
+#include <lk/init.h>
 
 #define LOCAL_TRACE 0
 
@@ -43,7 +46,12 @@ static void append_desc_data(usb_descriptor *desc, const void *dat, size_t len)
 
 	memcpy(ptr, desc->desc, desc->len);
 	memcpy(ptr + desc->len, dat, len);
-	free(desc->desc);
+
+	/* free the old buffer if it wasn't marked static */
+	if ((desc->flags & USB_DESC_FLAG_STATIC) == 0)
+		free(desc->desc);
+	desc->flags &= ~USB_DESC_FLAG_STATIC;
+
 	desc->desc = ptr;
 	desc->len += len;
 }
@@ -92,7 +100,7 @@ void usb_set_string_descriptor(usb_descriptor *desc, const char *string)
 	int datalen = len * 2 + 2;
 
 	data = malloc(datalen);
-	
+
 	/* write length field */
 	data[0] = 0x0300 + datalen;
 
@@ -116,7 +124,7 @@ static void set_usb_id(uint16_t vendor, uint16_t product)
 	((uint16_t *)config->highspeed.device.desc)[5] = product;
 }
 
-void usb_add_string(const char *string, uint8_t id) 
+status_t usb_add_string(const char *string, uint8_t id)
 {
 	uint i;
 	size_t len = strlen(string);
@@ -134,26 +142,41 @@ void usb_add_string(const char *string, uint8_t id)
 			strings[i].string.desc = strbuf;
 			strings[i].string.len = len * 2 + 2;
 			strings[i].id = id;
-			break;
+			return NO_ERROR;
 		}
+	}
+
+	return ERR_NO_MEMORY;
+}
+
+static void usb_set_active_config(uint8_t config)
+{
+	if (config != active_config) {
+		active_config = config;
+		if (active_config != 0)
+			printf("usb online\n");
+		else
+			printf("usb offline\n");
 	}
 }
 
-static int default_usb_callback(usbc_callback_op_t op, const union usb_callback_args *args)
+status_t usb_callback(usbc_callback_op_t op, const union usb_callback_args *args)
 {
 	LTRACEF("op %d, args %p\n", op, args);
 
 	/* start looking for specific things to handle */
-	if (op == CB_SETUP_MSG) {
+	if (op == USB_CB_SETUP_MSG) {
 		const struct usb_setup *setup = args->setup;
 		DEBUG_ASSERT(setup);
-		LTRACEF("SETUP: req_type=%#x req=%#x value=%#x index=%#x len=%#x\n", setup->request_type, setup->request, setup->value, setup->index, setup->length);
+		LTRACEF("SETUP: req_type=%#x req=%#x value=%#x index=%#x len=%#x\n",
+				setup->request_type, setup->request, setup->value, setup->index, setup->length);
 
 		if ((setup->request_type & TYPE_MASK) == TYPE_STANDARD) {
 			switch (setup->request) {
 				case SET_ADDRESS:
 					LTRACEF("SET_ADDRESS 0x%x\n", setup->value);
 					usbc_ep0_ack();
+					usbc_set_address(setup->value);
 					break;
 				case SET_FEATURE:
 				case CLEAR_FEATURE:
@@ -174,22 +197,22 @@ static int default_usb_callback(usbc_callback_op_t op, const union usb_callback_
 						speed = &config->lowspeed;
 					}
 
-					if ((setup->request_type & RECIP_MASK) == RECIP_DEVICE)	{
+					if ((setup->request_type & RECIP_MASK) == RECIP_DEVICE) {
 						switch (setup->value) {
 							case 0x100: /* device */
 								LTRACEF("got GET_DESCRIPTOR, device descriptor\n");
-								usbc_ep0_send(speed->device.desc, speed->device.len, 
-										setup->length);
+								usbc_ep0_send(speed->device.desc, speed->device.len,
+								              setup->length);
 								break;
 							case 0x200:    /* CONFIGURATION */
 								LTRACEF("got GET_DESCRIPTOR, config descriptor\n");
 								usbc_ep0_send(speed->config.desc, speed->config.len,
-										setup->length);
+								              setup->length);
 								break;
 							case 0x300:    /* Language ID */
 								LTRACEF("got GET_DESCRIPTOR, language id\n");
 								usbc_ep0_send(config->langid.desc,
-										config->langid.len, setup->length);
+								              config->langid.len, setup->length);
 								break;
 							case (0x301)...(0x3ff): {
 								/* string descriptor, search our list for a match */
@@ -199,8 +222,8 @@ static int default_usb_callback(usbc_callback_op_t op, const union usb_callback_
 								for (i = 0; i < MAX_STRINGS; i++) {
 									if (strings[i].id == id) {
 										usbc_ep0_send(strings[i].string.desc,
-											strings[i].string.len, 
-											setup->length);
+										              strings[i].string.len,
+										              setup->length);
 										found = true;
 										break;
 									}
@@ -213,8 +236,8 @@ static int default_usb_callback(usbc_callback_op_t op, const union usb_callback_
 							}
 							case 0x600:    /* DEVICE QUALIFIER */
 								LTRACEF("got GET_DESCRIPTOR, device qualifier\n");
-								usbc_ep0_send(speed->device_qual.desc, 
-										speed->device_qual.len, setup->length);
+								usbc_ep0_send(speed->device_qual.desc,
+								              speed->device_qual.len, setup->length);
 								break;
 							case 0xa00:
 								/* we aint got one of these */
@@ -235,8 +258,8 @@ static int default_usb_callback(usbc_callback_op_t op, const union usb_callback_
 
 				case SET_CONFIGURATION:
 					LTRACEF("SET_CONFIGURATION %d\n", setup->value);
-					active_config = setup->value;
 					usbc_ep0_ack();
+					usb_set_active_config(setup->value);
 					break;
 
 				case GET_CONFIGURATION:
@@ -265,13 +288,15 @@ static int default_usb_callback(usbc_callback_op_t op, const union usb_callback_
 				default:
 					LTRACEF("unhandled standard request 0x%x\n", setup->request);
 			}
+		} else {
+			LTRACEF("unhandled nonstandard request 0x%x\n", setup->request);
 		}
 	}
 
-	return 0;
+	return NO_ERROR;
 }
 
-void usb_setup(usb_config *_config)
+status_t usb_setup(usb_config *_config)
 {
 	ASSERT(_config);
 
@@ -279,11 +304,10 @@ void usb_setup(usb_config *_config)
 
 	ASSERT(usb_active == false);
 
-	// set the default usb control callback handler	
-	usbc_set_callback(&default_usb_callback);
+	return NO_ERROR;
 }
 
-void usb_start(void)
+status_t usb_start(void)
 {
 	ASSERT(config);
 	ASSERT(usb_active == false);
@@ -291,17 +315,24 @@ void usb_start(void)
 	// go online
 	usbc_set_active(true);
 	usb_active = true;
+
+	return NO_ERROR;
 }
 
-void usb_stop(void)
+status_t usb_stop(void)
 {
 	ASSERT(usb_active == true);
 
 	usb_active = false;
 	usbc_set_active(false);
+
+	return NO_ERROR;
 }
 
-void usb_init(void)
+static void usb_init(uint level)
 {
 }
 
+LK_INIT_HOOK(usb, usb_init, LK_INIT_LEVEL_THREADING);
+
+// vim: set ts=4 sw=4 noexpandtab:

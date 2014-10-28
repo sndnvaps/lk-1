@@ -3,10 +3,12 @@ build-*
 *~
 tags
 TAGS
+cscope.out
 local.mk
-target/*/tools/mkheader
-
-# cscope files
+*.orig
 cscope.*
 ncscope.*
-
+doit
+t
+tagit
+target/*/tools/mkheader

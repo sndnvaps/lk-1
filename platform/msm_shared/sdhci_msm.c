@@ -36,9 +36,11 @@
 #include <stdlib.h>
 #include <bits.h>
 #include <debug.h>
+#include <assert.h>
 #include <mmc.h>
 #include <sdhci.h>
 #include <sdhci_msm.h>
+#include <platform/msm_shared/timer.h>
 
 
 #define MX_DRV_SUPPORTED_HS200 3
@@ -77,10 +79,11 @@ static const uint32_t tuning_block_128[] = {
  *           Once we receive the interrupt, we will ack the power control
  *           register that we have successfully completed pmic transactions
  */
-static enum handler_return sdhci_int_handler(struct sdhci_msm_data *data)
+static enum handler_return sdhci_int_handler(void *__data)
 {
 	uint32_t ack;
 	uint32_t status;
+	struct sdhci_msm_data *data = __data;
 
 	/*
 	 * Read the mask register to check if BUS & IO level
@@ -382,7 +385,7 @@ static int sdhci_msm_find_appropriate_phase(struct sdhci_host *host,
 										   uint32_t total_phases)
 {
 	int sub_phases[MAX_PHASES][MAX_PHASES]={{0}};
-	int phases_per_row[MAX_PHASES] = {0};
+	uint32_t phases_per_row[MAX_PHASES] = {0};
 	uint32_t i,j;
 	int selected_phase = 0;
 	uint32_t row_index = 0;
@@ -478,8 +481,8 @@ static uint32_t sdhci_msm_cm_dll_sdc4_calibration(struct sdhci_host *host)
 
 	DBG("\n CM_DLL_SDC4 Calibration Start\n");
 
-	/*1.Write the default value to  SDCC_HC_REG_DDR_CONFIG register*/
-	REG_WRITE32(host, DDR_CONFIG_VAL, SDCC_HC_REG_DDR_CONFIG);
+	/*1.Write the DDR config value to SDCC_HC_REG_DDR_CONFIG register*/
+	REG_WRITE32(host, target_ddr_cfg_val(), SDCC_HC_REG_DDR_CONFIG);
 
 	/*2. Write DDR_CAL_EN to '1' */
 	REG_WRITE32(host, (REG_READ32(host, SDCC_HC_REG_DLL_CONFIG_2) | DDR_CAL_EN), SDCC_HC_REG_DLL_CONFIG_2);
@@ -622,17 +625,19 @@ static uint32_t sdhci_msm_hs400_calibration(struct sdhci_host *host)
  */
 uint32_t sdhci_msm_execute_tuning(struct sdhci_host *host, struct mmc_card *card, uint32_t bus_width)
 {
-	uint32_t *tuning_block;
+	const uint32_t *tuning_block;
 	uint32_t *tuning_data;
-	uint32_t tuned_phases[MAX_PHASES] = {{0}};
+	uint32_t tuned_phases[MAX_PHASES] = {0};
 	uint32_t size;
 	uint32_t phase = 0;
 	uint32_t tuned_phase_cnt = 0;
 	uint8_t drv_type = 0;
 	bool drv_type_changed = false;
 	int ret = 0;
-	int i;
+	unsigned i;
 	struct sdhci_msm_data *msm_host;
+
+	memset(&tuned_phases, 0, ARRAY_SIZE(tuned_phases));
 
 	msm_host = host->msm_host;
 
@@ -648,7 +653,7 @@ uint32_t sdhci_msm_execute_tuning(struct sdhci_host *host, struct mmc_card *card
 		goto out;
 	}
 
-	if (bus_width == DATA_BUS_WIDTH_8BIT)
+	if (bus_width == (int)DATA_BUS_WIDTH_8BIT)
 	{
 		tuning_block = tuning_block_128;
 		size = sizeof(tuning_block_128);

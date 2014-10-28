@@ -28,30 +28,30 @@
  */
 
 #include <debug.h>
-#include <smem.h>
-#include <err.h>
-#include <msm_panel.h>
+#include <malloc.h>
+#include <dev/fbcon.h>
 #include <mipi_dsi.h>
-#include <pm8x41.h>
-#include <pm8x41_wled.h>
-#include <board.h>
-#include <mdp5.h>
-#include <scm.h>
-#include <platform/gpio.h>
-#include <platform/iomap.h>
 #include <target/display.h>
+#include <string.h>
 
-#include "include/panel.h"
-#include "include/display_resource.h"
+static void* real_fb = NULL;
+void sync_sw_buffer(void) {
+	struct fbcon_config *config = fbcon_display();
+	memcpy(real_fb, config->base, (config->width*config->height*config->bpp/8));
+}
 
 void target_display_init(const char *panel_name)
 {
+#ifdef DISPLAY_2NDSTAGE_FBADDR
+	uint32_t fb_addr = DISPLAY_2NDSTAGE_FBADDR;
+#else
 	uint32_t fb_addr = MIPI_FB_ADDR;
+#endif
 
 	struct fbcon_config *config = NULL;
 	config = (struct fbcon_config*)malloc(sizeof(struct fbcon_config));
 
-	config->base = fb_addr;
+	real_fb = (void*)fb_addr;
 	config->width = DISPLAY_2NDSTAGE_WIDTH;
 	config->height = DISPLAY_2NDSTAGE_HEIGHT;
 	config->stride = config->width;
@@ -60,7 +60,17 @@ void target_display_init(const char *panel_name)
 	config->update_start = NULL;
 	config->update_done = NULL;
 
+#if TARGET_MSM8960_ARIES
+	config->base = real_fb;
+	config->update_start = trigger_mdp_dsi;
+#else
+	uint8_t* fb = real_fb;
+	int fb_size = (config->width*config->height*config->bpp/8);
+	config->base = fb + fb_size;
+	memset(config->base, 0, fb_size);
+	config->update_start = sync_sw_buffer;
+#endif
+
 	fbcon_setup(config);
 	display_image_on_screen();
-
 }

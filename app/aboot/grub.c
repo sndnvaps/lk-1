@@ -12,6 +12,10 @@
 #include <ext4_mmcdev.h>
 #include <kernel/thread.h>
 
+#if WITH_APP_DISPLAY_SERVER
+#include <app/display_server.h>
+#endif
+
 #include "grub.h"
 #include "stat.h"
 #include "uboot_api/uboot_part.h"
@@ -53,6 +57,11 @@ void grub_get_bootdev(char **value) {
 	*value = grub_bootdev;
 }
 
+static char* grub_bootpath = NULL;
+void grub_get_bootpath(char **value) {
+	*value = grub_bootpath;
+}
+
 static int grub_found_tar = 0;
 int grub_has_tar(void) {
 	return grub_found_tar;
@@ -60,6 +69,7 @@ int grub_has_tar(void) {
 
 #ifdef GRUB_BOOT_PARTITION
 #define GRUB_MOUNTPOINT "/"GRUB_BOOT_PARTITION"/"
+#define GRUB_PATH GRUB_BOOT_PATH_PREFIX"boot/grub"
 #define HAS_FLAG(m, mask)	(((m) & mask) == mask)
 #define ALLOW_BOOT(m) ( \
 	S_ISREG((m)) \
@@ -113,7 +123,7 @@ static int grub_load_from_mmc(void) {
 	uint32_t bytes_read;
 	int ret = 0, allow = 0;
 
-	dprintf(INFO, "%s: part=[%s]\n", __func__, GRUB_BOOT_PARTITION);
+	dprintf(INFO, "%s: part=[%s] path=[%s]\n", __func__, GRUB_BOOT_PARTITION, GRUB_PATH);
 
 	// create ext4 device
 	struct ext4_blockdev* mmcdev = ext4_mmcdev_get(GRUB_BOOT_PARTITION);
@@ -137,23 +147,23 @@ static int grub_load_from_mmc(void) {
 	}
 
 	// check permissions of crucial files
-	if(grub_mmc_check_permissions(GRUB_MOUNTPOINT"boot/grub/core.img", &allow)==EOK && !allow)
+	if(grub_mmc_check_permissions(GRUB_MOUNTPOINT GRUB_PATH "/core.img", &allow)==EOK && !allow)
 		return -1;
-	if(grub_mmc_check_permissions(GRUB_MOUNTPOINT"boot/grub/grub.cfg", &allow)==EOK && !allow)
+	if(grub_mmc_check_permissions(GRUB_MOUNTPOINT GRUB_PATH "/grub.cfg", &allow)==EOK && !allow)
 		return -1;
-	if(grub_mmc_check_permissions(GRUB_MOUNTPOINT"boot/grub/grubenv", &allow)==EOK && !allow)
+	if(grub_mmc_check_permissions(GRUB_MOUNTPOINT GRUB_PATH "/grubenv", &allow)==EOK && !allow)
 		return -1;
 	dprintf(INFO, "Permissions are good\n");
 
 	// open file
-	ret = ext4_fopen(&f, GRUB_MOUNTPOINT"boot/grub/core.img", "rb");
+	ret = ext4_fopen(&f, GRUB_MOUNTPOINT GRUB_PATH "/core.img", "rb");
 	if(ret != EOK){
 		dprintf(CRITICAL, "ext4_fopen ERROR = %d\n", ret);
 		return -1;
 	}
 
 	// read file
-	ret = ext4_fread(&f, (void*)GRUB_LOADING_ADDRESS, ext4_fsize(&f), &bytes_read);
+	ret = ext4_fread(&f, (void*)GRUB_LOADING_ADDRESS_VIRT, ext4_fsize(&f), &bytes_read);
 	if(ret != EOK){
 		dprintf(CRITICAL, "ext4_fread ERROR = %d\n", ret);
 		return -1;
@@ -178,6 +188,7 @@ static int grub_load_from_mmc(void) {
 	char buf[20];
 	sprintf(buf, "hd0,%u", index+1);
 	grub_bootdev = strdup(buf);
+	grub_bootpath = strdup(GRUB_BOOT_PATH_PREFIX "boot/grub");
 
 	dprintf(INFO, "Loaded GRUB from MMC\n");
 	return 0;
@@ -199,12 +210,13 @@ static int grub_load_from_tar(void) {
 	}
 
 	// load file into RAM
-	if(tar_read_file(&tio, &fi, (void*)GRUB_LOADING_ADDRESS)) {
+	if(tar_read_file(&tio, &fi, (void*)GRUB_LOADING_ADDRESS_VIRT)) {
 		dprintf(CRITICAL, "%s: couldn't read core.img!\n", __func__);
 		return -1;
 	}
 
 	grub_bootdev = strdup("hd1");
+	grub_bootpath = strdup("/boot/grub");
 	grub_found_tar = 1;
 
 	dprintf(INFO, "Loaded GRUB from TAR\n");
@@ -232,6 +244,7 @@ static int grub_sideload_handler(void *data)
 		tio.lba = hdr->ramdisk_size;
 		// set bootdev
 		grub_bootdev = strdup("hd1");
+		grub_bootpath = strdup("/boot/grub");
 		grub_found_tar = 1;
 	}
 	else {
@@ -240,12 +253,19 @@ static int grub_sideload_handler(void *data)
 		char buf[20];
 		sprintf(buf, "hd0,%u", index+1);
 		grub_bootdev = strdup(buf);
+		grub_bootpath = strdup(GRUB_BOOT_PATH_PREFIX "boot/grub");
 	}
 	dprintf(INFO, "bootdev: %s\n", grub_bootdev);
+	dprintf(INFO, "bootpath: %s\n", grub_bootpath);
 
 	// BOOT !
 	void (*entry)(unsigned, unsigned, unsigned*) = (void*)hdr->kernel_addr;
-	dprintf(INFO, "booting GRUB from sideload @ %p ramdisk @ %p\n", entry, hdr->ramdisk_addr);
+	dprintf(INFO, "booting GRUB from sideload @ %p ramdisk @ %p\n", entry, (void*)hdr->ramdisk_addr);
+
+#if WITH_APP_DISPLAY_SERVER
+	display_server_stop();
+#endif
+
 	entry(0, board_machtype(), NULL);
 
 	return 0;
@@ -265,7 +285,7 @@ int grub_load_from_sideload(void* data) {
 
 int grub_boot(void)
 {
-	void (*entry)(unsigned, unsigned, unsigned*) = (void*)GRUB_LOADING_ADDRESS;
+	void (*entry)(unsigned, unsigned, unsigned*) = (void*)GRUB_LOADING_ADDRESS_VIRT;
 
 	// load grub into RAM
 #ifdef GRUB_BOOT_PARTITION
@@ -288,6 +308,11 @@ int grub_boot(void)
 boot:
 	// BOOT !
 	dprintf(INFO, "booting GRUB @ %p\n", entry);
+
+#if WITH_APP_DISPLAY_SERVER
+	display_server_stop();
+#endif
+
 	entry(0, board_machtype(), NULL);
 	
 	return 0;

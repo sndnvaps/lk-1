@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Travis Geiselbrecht
+ * Copyright (c) 2008-2014 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -26,19 +26,23 @@
 #ifndef ASSEMBLY
 
 #include <sys/types.h>
+#include <stddef.h>
+#include <stdbool.h>
 #include <compiler.h>
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
+__BEGIN_CDECLS
 
-void arch_enable_ints(void);
-void arch_disable_ints(void);
+/* fast routines that most arches will implement inline */
+static void arch_enable_ints(void);
+static void arch_disable_ints(void);
+static bool arch_ints_disabled(void);
 
-int atomic_swap(volatile int *ptr, int val);
-int atomic_add(volatile int *ptr, int val);
-int atomic_and(volatile int *ptr, int val);
-int atomic_or(volatile int *ptr, int val);
+static int atomic_swap(volatile int *ptr, int val);
+static int atomic_add(volatile int *ptr, int val);
+static int atomic_and(volatile int *ptr, int val);
+static int atomic_or(volatile int *ptr, int val);
+
+static uint32_t arch_cycle_count(void);
 
 #endif // !ASSEMBLY
 #define ICACHE 1
@@ -54,23 +58,17 @@ void arch_clean_invalidate_cache_range(addr_t start, size_t len);
 void arch_invalidate_cache_range(addr_t start, size_t len);
 void arch_sync_cache_range(addr_t start, size_t len);
 void cache_clean_invalidate_unaligned_start_addr(addr_t start, size_t size);
-	
+
 void arch_idle(void);
 
 void arch_disable_mmu(void);
 
-void arch_switch_stacks_and_call(addr_t call, addr_t stack) __NO_RETURN;
+__END_CDECLS
 
 uint32_t arch_cycle_count(void);
 
-#if defined(__cplusplus)
-}
-#endif
-
 #endif // !ASSEMBLY
 
-#if ARCH_ARM
-#include <arch/arm/ops.h>
-#endif
+#include <arch/arch_ops.h>
 
 #endif

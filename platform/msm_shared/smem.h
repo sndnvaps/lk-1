@@ -189,7 +189,7 @@ struct smem_board_info_v8 {
 	 * Need for 8 bytes alignment
 	 * while reading from shared memory
 	 */
-	unsigned buffer_align;
+	uint32_t foundry_id; /* Used as foundry_id only for v9 and used as an alignment field for v8 */
 };
 
 typedef struct {
@@ -371,11 +371,19 @@ enum {
 	MSM8216  = 248,
 	MSM8116  = 249,
 	MSM8616  = 250,
+	MSM8992  = 251,
+	APQ8092  = 252,
 	APQ8094  = 253,
 	FSM9008  = 254,
 	FSM9010  = 255,
 	FSM9016  = 256,
 	FSM9055  = 257,
+	MSM8209  = 258,
+	MSM8208  = 259,
+	MDM9209  = 260,
+	MDM9309  = 261,
+	MDM9609  = 262,
+	MSM8239  = 263,
 };
 
 enum platform {
@@ -574,7 +582,7 @@ typedef struct smem_ram_ptn_v1 ram_partition;
 
 unsigned smem_read_alloc_entry_offset(smem_mem_type_t type, void *buf, int len, int offset);
 int smem_ram_ptable_init(struct smem_ram_ptable *smem_ram_ptable);
-int smem_ram_ptable_init_v1(); /* Used on platforms that use ram ptable v1 */
+int smem_ram_ptable_init_v1(void); /* Used on platforms that use ram ptable v1 */
 void smem_get_ram_ptable_entry(ram_partition*, uint32_t entry);
 uint32_t smem_get_ram_ptable_version(void);
 uint32_t smem_get_ram_ptable_len(void);

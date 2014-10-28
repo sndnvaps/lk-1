@@ -30,8 +30,11 @@
 #ifndef _PLATFORM_MSM_SHARED_MSM_PANEL_H_
 #define _PLATFORM_MSM_SHARED_MSM_PANEL_H_
 
+#include <err.h>
+#include <debug.h>
 #include <stdint.h>
 #include <dev/fbcon.h>
+#include <platform.h>
 
 #define TRUE	1
 #define FALSE	0
@@ -63,6 +66,7 @@ enum msm_mdp_hw_revision {
 	MDP_REV_30,
 	MDP_REV_303,
 	MDP_REV_304,
+	MDP_REV_305,
 	MDP_REV_31,
 	MDP_REV_40,
 	MDP_REV_41,
@@ -111,6 +115,45 @@ struct lcdc_panel_info {
 	uint8_t split_display;
 	uint8_t pipe_swap;
 	uint8_t dst_split;
+};
+
+struct fbc_panel_info {
+	uint32_t enabled;
+	uint32_t comp_ratio;
+	uint32_t comp_mode;
+	uint32_t qerr_enable;
+	uint32_t cd_bias;
+	uint32_t pat_enable;
+	uint32_t vlc_enable;
+	uint32_t bflc_enable;
+
+	uint32_t line_x_budget;
+	uint32_t block_x_budget;
+	uint32_t block_budget;
+
+	uint32_t lossless_mode_thd;
+	uint32_t lossy_mode_thd;
+	uint32_t lossy_rgb_thd;
+	uint32_t lossy_mode_idx;
+};
+
+/* intf timing settings */
+struct intf_timing_params {
+	uint32_t width;
+	uint32_t height;
+	uint32_t xres;
+	uint32_t yres;
+
+	uint32_t h_back_porch;
+	uint32_t h_front_porch;
+	uint32_t v_back_porch;
+	uint32_t v_front_porch;
+	uint32_t hsync_pulse_width;
+	uint32_t vsync_pulse_width;
+
+	uint32_t border_clr;
+	uint32_t underflow_clr;
+	uint32_t hsync_skew;
 };
 
 struct mipi_panel_info {
@@ -195,13 +238,15 @@ struct msm_panel_info {
 	uint32_t type;
 	uint32_t wait_cycle;
 	uint32_t clk_rate;
-	uint32_t rotation;
+	uint32_t orientation;
 	/*  Select pipe type for handoff */
 	uint32_t pipe_type;
 	char     lowpowerstop;
+	char     lcd_reg_en;
 
 	struct lcd_panel_info lcd;
 	struct lcdc_panel_info lcdc;
+	struct fbc_panel_info fbc;
 	struct mipi_panel_info mipi;
 	struct lvds_panel_info lvds;
 	struct hdmi_panel_info hdmi;
@@ -224,12 +269,32 @@ struct msm_fb_panel_data {
 	int rotate;
 
 	/* function entry chain */
-	int (*power_func) (int enable);
+	int (*power_func) (int enable, struct msm_panel_info *);
 	int (*clk_func) (int enable);
 	int (*bl_func) (int enable);
 	int (*pll_clk_func) (int enable, struct msm_panel_info *);
 	int (*post_power_func)(int enable);
 	int (*pre_init_func)(void);
 };
+
+int msm_display_off(void);
+int mdp_lcdc_config(struct msm_panel_info *pinfo, struct fbcon_config *fb);
+int lvds_on(struct msm_fb_panel_data *pdata);
+int mdp_lcdc_on(void);
+int mdp_lcdc_off(void);
+int target_display_pre_on(void);
+int target_display_post_on(void);
+int target_display_pre_off(void);
+int target_display_post_off(void);
+int target_ldo_ctrl(uint8_t enable, struct msm_panel_info *pinfo);
+void target_edp_panel_init(struct msm_panel_info *pinfo);
+int target_edp_panel_clock(uint8_t enable);
+int target_edp_panel_enable(void);
+int target_edp_panel_disable(void);
+int target_edp_bl_ctrl(int enable);
+int target_hdmi_panel_clock(uint8_t enable, struct msm_panel_info *pinfo);
+int target_hdmi_regulator_ctrl(bool enable);
+int mdss_hdmi_init(void);
+int target_hdmi_gpio_ctrl(bool enable);
 
 #endif

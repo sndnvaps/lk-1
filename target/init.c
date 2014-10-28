@@ -24,10 +24,14 @@
 #include <debug.h>
 #include <target.h>
 #include <compiler.h>
+#include <printf.h>
+#if WITH_PLATFORM_MSM_SHARED
 #include <dload_util.h>
+#include <sdhci_msm.h>
+#endif
 
 #define EXPAND(NAME) #NAME
-#define TARGET(NAME) EXPAND(NAME)
+
 /*
  * default implementations of these routines, if the target code
  * chooses not to implement.
@@ -41,6 +45,11 @@ __WEAK void target_init(void)
 {
 }
 
+__WEAK void target_set_led(unsigned int led, bool on)
+{
+}
+
+#if WITH_PLATFORM_MSM_SHARED
 __WEAK void *target_get_scratch_address(void)
 {
     return (void *)(SCRATCH_ADDR);
@@ -69,6 +78,11 @@ __WEAK void reboot_device(unsigned reboot_reason)
 {
 }
 
+__WEAK uint32_t is_user_force_reset(void)
+{
+	return 0;
+}
+
 __WEAK int set_download_mode(enum dload_mode mode)
 {
 	return -1;
@@ -79,17 +93,17 @@ __WEAK unsigned target_pause_for_battery_charge(void)
     return 0;
 }
 
-__WEAK unsigned target_baseband()
+__WEAK unsigned target_baseband(void)
 {
 	return 0;
 }
 
 __WEAK void target_serialno(unsigned char *buf)
 {
-	snprintf((char *) buf, 13, "%s",TARGET(BOARD));
+	snprintf((char *) buf, 13, "%s", TARGET);
 }
 
-__WEAK void target_fastboot_init()
+__WEAK void target_fastboot_init(void)
 {
 }
 
@@ -121,7 +135,7 @@ __WEAK void target_load_ssd_keystore(void)
 }
 
 /* Default target does not support continuous splash screen feature. */
-__WEAK int target_cont_splash_screen()
+__WEAK int target_cont_splash_screen(void)
 {
 	return 0;
 }
@@ -155,18 +169,18 @@ __WEAK void target_display_shutdown(void)
 {
 }
 
-__WEAK uint8_t target_panel_auto_detect_enabled()
+__WEAK uint8_t target_panel_auto_detect_enabled(void)
 {
 	return 0;
 }
 
-__WEAK uint8_t target_is_edp()
+__WEAK uint8_t target_is_edp(void)
 {
 	return 0;
 }
 
 /* default usb controller to be used. */
-__WEAK const char * target_usb_controller()
+__WEAK const char * target_usb_controller(void)
 {
 	return "ci";
 }
@@ -188,14 +202,25 @@ __WEAK uint32_t target_get_hlos_subtype(void)
 	return 0;
 }
 
+/* Initialize crypto parameters */
+__WEAK void target_crypto_init_params(void)
+{
+}
+
+/* Default CFG delay value */
+__WEAK uint32_t target_ddr_cfg_val(void)
+{
+	return DDR_CONFIG_VAL;
+}
+
 /* Return 1 if vol_up pressed */
-__WEAK int target_volume_up()
+__WEAK int target_volume_up(void)
 {
 	return 0;
 }
 
 /* Return 1 if vol_down pressed */
-__WEAK uint32_t target_volume_down()
+__WEAK uint32_t target_volume_down(void)
 {
 	return 0;
 }
@@ -205,3 +230,4 @@ __WEAK int target_power_key(void)
 {
 	return 0;
 }
+#endif

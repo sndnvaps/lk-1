@@ -1,7 +1,7 @@
 LOCAL_DIR := $(GET_LOCAL_DIR)
 
-INCLUDES += \
-	-I$(LOCAL_DIR)/include
+GLOBAL_INCLUDES += \
+	$(LOCAL_DIR)/include
 
 PLATFORM := omap3
 
@@ -10,6 +10,6 @@ MODULES += \
 
 MEMSIZE := 0x08000000	# 128MB
 
-DEFINES += \
+GLOBAL_DEFINES += \
 	SDRAM_SIZE=$(MEMSIZE)
 

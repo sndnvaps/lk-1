@@ -36,7 +36,7 @@
 struct udc_request {
 	void *buf;
 	unsigned length;
-	void (*complete)();
+	void (*complete)(struct udc_request *req, unsigned actual, int status);
 	void *context;
 };
 
@@ -48,14 +48,14 @@ void udc_request_free(struct udc_request *req);
 int udc_request_queue(struct udc_endpoint *ept, struct udc_request *req);
 int udc_request_cancel(struct udc_endpoint *ept, struct udc_request *req);
 
-#define UDC_TYPE_BULK_IN	1
-#define UDC_TYPE_BULK_OUT	2
+#define UDC_TYPE_BULK_IN    1
+#define UDC_TYPE_BULK_OUT   2
 
 struct udc_endpoint *udc_endpoint_alloc(unsigned type, unsigned maxpkt);
 void udc_endpoint_free(struct udc_endpoint *ept);
 
-#define UDC_EVENT_ONLINE	1
-#define UDC_EVENT_OFFLINE	2
+#define UDC_EVENT_ONLINE    1
+#define UDC_EVENT_OFFLINE   2
 
 struct udc_gadget {
 	void (*notify)(struct udc_gadget *gadget, unsigned event);
@@ -86,6 +86,7 @@ int udc_init(struct udc_device *devinfo);
 int udc_register_gadget(struct udc_gadget *gadget);
 int udc_start(void);
 int udc_stop(void);
+int usb_is_connected(void);
 
 /* these should probably go elsewhere */
 #define GET_STATUS           0

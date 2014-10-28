@@ -1,25 +1,38 @@
-# comment out or override if you want to see the full output of each command
-NOECHO ?= @
+# use linker garbage collection, if requested
+ifeq ($(WITH_LINKER_GC),1)
+GLOBAL_COMPILEFLAGS += -ffunction-sections -fdata-sections
+GLOBAL_LDFLAGS += --gc-sections
+endif
 
 $(OUTBIN): $(OUTELF)
 	@echo generating image: $@
 	$(NOECHO)$(SIZE) $<
-	$(NOCOPY)$(OBJCOPY) -O binary $< $@
+	$(NOECHO)$(OBJCOPY) -O binary $< $@
+
+$(OUTELF).hex: $(OUTELF)
+	@echo generating hex file: $@
+	$(NOECHO)$(OBJCOPY) -O ihex $< $@
 
 ifeq ($(ENABLE_TRUSTZONE), 1)
-$(OUTELF): $(ALLOBJS) $(LINKER_SCRIPT) $(OUTPUT_TZ_BIN)
+$(OUTELF): $(ALLMODULE_OBJS) $(EXTRA_OBJS) $(LINKER_SCRIPT) $(OUTPUT_TZ_BIN)
 	@echo linking $@
-	$(NOECHO)$(LD) $(LDFLAGS) -T $(LINKER_SCRIPT) $(OUTPUT_TZ_BIN) $(ALLOBJS) $(LIBGCC) -o $@
+	$(NOECHO)$(SIZE) -t --common $(sort $(ALLMODULE_OBJS))
+	$(NOECHO)$(LD) $(GLOBAL_LDFLAGS) -T $(LINKER_SCRIPT) $(OUTPUT_TZ_BIN) $(ALLMODULE_OBJS) $(EXTRA_OBJS) $(LIBGCC) -o $@
 else
-$(OUTELF): $(ALLOBJS) $(LINKER_SCRIPT)
+$(OUTELF): $(ALLMODULE_OBJS) $(EXTRA_OBJS) $(LINKER_SCRIPT)
 	@echo linking $@
-	$(NOECHO)$(LD) $(LDFLAGS) -T $(LINKER_SCRIPT) $(ALLOBJS) $(LIBGCC) -o $@
+	$(NOECHO)$(SIZE) -t --common $(sort $(ALLMODULE_OBJS))
+	$(NOECHO)$(LD) $(GLOBAL_LDFLAGS) -T $(LINKER_SCRIPT) $(ALLMODULE_OBJS) $(EXTRA_OBJS) $(LIBGCC) -o $@
 endif
 
 
 $(OUTELF).sym: $(OUTELF)
 	@echo generating symbols: $@
 	$(NOECHO)$(OBJDUMP) -t $< | $(CPPFILT) > $@
+
+$(OUTELF).sym.sorted: $(OUTELF)
+	@echo generating symbols: $@
+	$(NOECHO)$(OBJDUMP) -t $< | $(CPPFILT) | sort > $@
 
 $(OUTELF).lst: $(OUTELF)
 	@echo generating listing: $@
@@ -43,5 +56,5 @@ $(OUTELF_STRIP): $(OUTELF)
 	@echo generating stripped elf: $@
 	$(NOECHO)$(STRIP) -S $< -o $@
 
-include arch/$(ARCH)/compile.mk
+#include arch/$(ARCH)/compile.mk
 

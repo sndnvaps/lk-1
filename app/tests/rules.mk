@@ -1,10 +1,20 @@
 LOCAL_DIR := $(GET_LOCAL_DIR)
 
-INCLUDES += -I$(LOCAL_DIR)/include
+MODULE := $(LOCAL_DIR)
 
-OBJS += \
-	$(LOCAL_DIR)/tests.o \
-	$(LOCAL_DIR)/thread_tests.o \
-	$(LOCAL_DIR)/printf_tests.o \
-	$(LOCAL_DIR)/i2c_tests.o \
-	$(LOCAL_DIR)/adc_tests.o
+GLOBAL_INCLUDES += $(LOCAL_DIR)/include
+
+MODULE_SRCS += \
+	$(LOCAL_DIR)/tests.c \
+	$(LOCAL_DIR)/thread_tests.c \
+	$(LOCAL_DIR)/printf_tests.c \
+	$(LOCAL_DIR)/clock_tests.c \
+	$(LOCAL_DIR)/cache_tests.c \
+	$(LOCAL_DIR)/benchmarks.c \
+	$(LOCAL_DIR)/float.c \
+	$(LOCAL_DIR)/float_instructions.S \
+	$(LOCAL_DIR)/fibo.c
+
+MODULE_COMPILEFLAGS += -Wno-format
+
+include make/module.mk

@@ -22,6 +22,7 @@
  */
 #include <sys/types.h>
 #include <debug.h>
+#include <trace.h>
 #include <err.h>
 #include <reg.h>
 #include <kernel/thread.h>
@@ -117,18 +118,16 @@ enum handler_return platform_irq(struct arm_iframe *frame)
 {
 	// get the current vector
 	unsigned int vector;
-   
+
 	// read the currently active IRQ
 	vector = *REG32(INTC_SIR_IRQ) & 0x7f;
 
 //	TRACEF("spsr 0x%x, pc 0x%x, currthread %p, vector %d, handler %p\n", frame->spsr, frame->pc, current_thread, vector, int_handler_table[vector].handler);
 
-#if THREAD_STATS
-	thread_stats.interrupts++;
-#endif
+	THREAD_STATS_INC(interrupts);
 
 	// deliver the interrupt
-	enum handler_return ret; 
+	enum handler_return ret;
 
 	ret = INT_NO_RESCHEDULE;
 	if (int_handler_table[vector].handler)

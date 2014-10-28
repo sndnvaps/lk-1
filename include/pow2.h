@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Travis Geiselbrecht
+ * Copyright (c) 2008-2013 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -24,6 +24,7 @@
 #define __POW2_H
 
 #include <sys/types.h>
+#include <stdbool.h>
 #include <compiler.h>
 
 /* routines for dealing with power of 2 values for efficiency */
@@ -32,7 +33,7 @@ static inline __ALWAYS_INLINE bool ispow2(uint val)
 	return ((val - 1) & val) == 0;
 }
 
-static inline __ALWAYS_INLINE uint log2(uint val)
+static inline __ALWAYS_INLINE uint log2_uint(uint val)
 {
 	if (!ispow2(val))
 		return 0; // undefined
@@ -54,7 +55,6 @@ static inline __ALWAYS_INLINE uint modpow2(uint val, uint modp2)
 {
 	return val & ((1UL << modp2) - 1);
 }
-
 
 #endif
 

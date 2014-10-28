@@ -1,10 +1,21 @@
 #!/bin/sh
 
-PROJECTS="armemu-test sam7ex256-test osk5912-test qemu-arm-test beagle-test surf-test"
+# build everything in the projects directory
+PROJECTS=`echo project/* | xargs -n1 basename | sed 's/\.mk//'`
 FAILED=""
 
+case `uname` in
+Linux)
+	N=`cat /proc/cpuinfo | grep processor | wc -l`
+	PARALLEL=-j`expr $N + $N`
+	;;
+*)
+	PARALLEL=-j4
+	;;
+esac
+
 for p in $PROJECTS; do
-	PROJECT=$p make -j2 || FAILED="$FAILED $p"
+	PROJECT=$p nice make -j4 || FAILED="$FAILED $p"
 done
 
 if [ "$FAILED" != "" ]; then

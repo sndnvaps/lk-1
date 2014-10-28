@@ -26,6 +26,7 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <assert.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <mmc_wrapper.h>
@@ -33,7 +34,10 @@
 #include <sdhci.h>
 #include <ufs.h>
 #include <target.h>
+#include <target.h>
 #include <string.h>
+#include <partition_parser.h>
+#include <boot_device.h>
 
 /*
  * Weak function for UFS.
@@ -87,7 +91,7 @@ __WEAK uint8_t ufs_get_num_of_luns(struct ufs_dev* dev)
  * Return  : Pointer to mmc card structure
  * Flow    : Get the card pointer from the device structure
  */
-static struct mmc_card *get_mmc_card()
+static struct mmc_card *get_mmc_card(void)
 {
 	void *dev;
 	struct mmc_card *card;
@@ -133,7 +137,7 @@ uint32_t mmc_write(uint64_t data_addr, uint32_t data_len, void *in)
 			val = mmc_sdhci_write((struct mmc_device *)dev, (void *)sptr, (data_addr / block_size), (write_size / block_size));
 			if (val)
 			{
-				dprintf(CRITICAL, "Failed Writing block @ %x\n", (data_addr / block_size));
+				dprintf(CRITICAL, "Failed Writing block @ %llx\n", (data_addr / block_size));
 				return val;
 			}
 			sptr += write_size;
@@ -145,7 +149,7 @@ uint32_t mmc_write(uint64_t data_addr, uint32_t data_len, void *in)
 			val = mmc_sdhci_write((struct mmc_device *)dev, (void *)sptr, (data_addr / block_size), (data_len / block_size));
 
 		if (val)
-			dprintf(CRITICAL, "Failed Writing block @ %x\n", (data_addr / block_size));
+			dprintf(CRITICAL, "Failed Writing block @ %llx\n", (data_addr / block_size));
 	}
 	else
 	{
@@ -195,7 +199,7 @@ uint32_t mmc_read(uint64_t data_addr, uint32_t *out, uint32_t data_len)
 			ret = mmc_sdhci_read((struct mmc_device *)dev, (void *)sptr, (data_addr / block_size), (read_size / block_size));
 			if (ret)
 			{
-				dprintf(CRITICAL, "Failed Reading block @ %x\n", (data_addr / block_size));
+				dprintf(CRITICAL, "Failed Reading block @ %llx\n", (data_addr / block_size));
 				return ret;
 			}
 			sptr += read_size;
@@ -207,7 +211,7 @@ uint32_t mmc_read(uint64_t data_addr, uint32_t *out, uint32_t data_len)
 			ret = mmc_sdhci_read((struct mmc_device *)dev, (void *)sptr, (data_addr / block_size), (data_len / block_size));
 
 		if (ret)
-			dprintf(CRITICAL, "Failed Reading block @ %x\n", (data_addr / block_size));
+			dprintf(CRITICAL, "Failed Reading block @ %llx\n", (data_addr / block_size));
 	}
 	else
 	{
@@ -231,7 +235,7 @@ uint32_t mmc_read(uint64_t data_addr, uint32_t *out, uint32_t data_len)
  * Flow    : Get the erase unit size from the card
  */
 
-uint32_t mmc_get_eraseunit_size()
+uint32_t mmc_get_eraseunit_size(void)
 {
 	uint32_t erase_unit_sz = 0;
 
@@ -288,7 +292,7 @@ static uint32_t mmc_zero_out(struct mmc_device* dev, uint32_t blk_addr, uint32_t
 	}
 	else
 	{
-		dprintf(CRITICAL, "Erase Fail: Erase size: %u is bigger than scratch region:%u\n", scratch_size);
+		dprintf(CRITICAL, "Erase Fail: Erase size: %u is bigger than scratch region:%u\n", erase_size, scratch_size);
 		return 1;
 	}
 
@@ -357,12 +361,21 @@ uint32_t mmc_erase_card(uint64_t addr, uint64_t len)
 
 			blk_addr += unaligned_blks;
 			blk_count -= unaligned_blks;
+
+			head_unit = blk_addr / erase_unit_sz;
+			tail_unit = (blk_addr + blk_count - 1) / erase_unit_sz;
+
+			if (tail_unit - head_unit <= 1)
+			{
+				dprintf(INFO, "SDHCI unit erase not required\n");
+				return mmc_zero_out(dev, blk_addr, blk_count);
+			}
 		}
 
 		unaligned_blks = blk_count % erase_unit_sz;
 		blks_to_erase = blk_count - unaligned_blks;
 
-		dprintf(SPEW, "Performing SDHCI erase: 0x%x:0x%x\n", blk_addr, blks_to_erase);
+		dprintf(SPEW, "Performing SDHCI erase: 0x%x:0x%llx\n", blk_addr, blks_to_erase);
 		if (mmc_sdhci_erase((struct mmc_device *)dev, blk_addr, blks_to_erase * block_size))
 		{
 			dprintf(CRITICAL, "MMC erase failed\n");
@@ -423,7 +436,7 @@ uint32_t mmc_get_psn(void)
  * Return  : Returns the density of the emmc card
  * Flow    : Get the density from card
  */
-uint64_t mmc_get_device_capacity()
+uint64_t mmc_get_device_capacity(void)
 {
 	if (platform_boot_dev_isemmc())
 	{
@@ -449,7 +462,7 @@ uint64_t mmc_get_device_capacity()
  * Return  : Returns the block size of the storage
  * Flow    : Get the block size form the card
  */
-uint32_t mmc_get_device_blocksize()
+uint32_t mmc_get_device_blocksize(void)
 {
 	if (platform_boot_dev_isemmc())
 	{
@@ -475,7 +488,7 @@ uint32_t mmc_get_device_blocksize()
  * Return  : Returns the page size for the card
  * Flow    : Get the page size for storage
  */
-uint32_t mmc_page_size()
+uint32_t mmc_page_size(void)
 {
 	if (platform_boot_dev_isemmc())
 	{
@@ -497,7 +510,7 @@ uint32_t mmc_page_size()
  * Return  : Clean up function for storage
  * Flow    : Put the mmc card to sleep
  */
-void mmc_device_sleep()
+void mmc_device_sleep(void)
 {
 	void *dev;
 	dev = target_mmc_device();
@@ -567,6 +580,7 @@ void mmc_read_partition_table(uint8_t arg)
 				dprintf(CRITICAL, "Error reading the partition table info for lun %d\n", lun);
 			}
 		}
+		mmc_set_lun(0);
 	}
 	else
 	{

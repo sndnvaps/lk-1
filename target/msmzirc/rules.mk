@@ -4,14 +4,17 @@ INCLUDES += -I$(LOCAL_DIR)/include -I$(LK_TOP_DIR)/platform/msm_shared
 
 PLATFORM := msmzirc
 
-MEMBASE                             ?= 0x87C00000
+MEMBASE                             ?= 0x81200000
 MEMSIZE                             := 0x00100000 # 1MB
 BASE_ADDR                           := 0x80000000
 SCRATCH_ADDR                        := 0x80000000
-SCRATCH_REGION1                     := 0x80000000
-SCRATCH_REGION1_SIZE                := 0x07C00000 # 124MB
+SCRATCH_REGION1                     := 0x81300000
+SCRATCH_REGION1_SIZE                := 0x06900000 # 105MB
 SCRATCH_REGION2                     := 0x88000000
 SCRATCH_REGION2_SIZE                := 0x08000000 # 128MB
+KERNEL_REGION                       := 0x80000000
+KERNEL_REGION_SIZE                  := 0x01200000 # 18MB
+
 
 DEFINES += NO_KEYPAD_DRIVER=1
 DEFINES += PERIPH_BLK_BLSP=1
@@ -31,6 +34,9 @@ DEFINES += \
 	MEMSIZE=$(MEMSIZE) \
 	SCRATCH_REGION1_SIZE=$(SCRATCH_REGION1_SIZE) \
 	SCRATCH_REGION2_SIZE=$(SCRATCH_REGION2_SIZE) \
+	KERNEL_REGION=$(KERNEL_REGION) \
+	KERNEL_REGION_SIZE=$(KERNEL_REGION_SIZE) \
+
 
 OBJS += \
 	$(LOCAL_DIR)/init.o \

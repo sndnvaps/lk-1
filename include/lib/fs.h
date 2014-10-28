@@ -23,7 +23,8 @@
 #ifndef __LIB_FS_H
 #define __LIB_FS_H
 
-void fs_init(void);
+#include <stdbool.h>
+#include <sys/types.h>
 
 struct file_stat {
 	bool is_dir;

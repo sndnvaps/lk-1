@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2008 Travis Geiselbrecht
- *
- * Copyright (c) 2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2008-2012 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -25,45 +23,65 @@
 #ifndef __DEBUG_H
 #define __DEBUG_H
 
-#include <assert.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <compiler.h>
 #include <platform/debug.h>
-#include <printf.h>
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
+__BEGIN_CDECLS
 
-#if defined(DEBUG)
-#define DEBUGLEVEL DEBUG
-#else
-#define DEBUGLEVEL 2
+#if !defined(LK_DEBUGLEVEL)
+#define LK_DEBUGLEVEL 0
 #endif
 
 /* debug levels */
 #define CRITICAL 0
-#define ALWAYS 0
+#define ALWAYS -1
 #define INFO 1
 #define SPEW 2
 
-/* output */
-void _dputc(char c); // XXX for now, platform implements
+#if !DISABLE_DEBUG_OUTPUT
+
+/* input/output */
+#define _dputc(c) platform_dputc(c)
 int _dputs(const char *str);
 int _dprintf(const char *fmt, ...) __PRINTFLIKE(1, 2);
 int _dvprintf(const char *fmt, va_list ap);
 
-#define dputc(level, str) do { if ((level) <= DEBUGLEVEL) { _dputc(str); } } while (0)
-#define dputs(level, str) do { if ((level) <= DEBUGLEVEL) { _dputs(str); } } while (0)
-#define dprintf(level, x...) do { if ((level) <= DEBUGLEVEL) { _dprintf(x); } } while (0)
-#define dvprintf(level, x...) do { if ((level) <= DEBUGLEVEL) { _dvprintf(x); } } while (0)
+/* dump memory */
+void hexdump(const void *ptr, size_t len);
+void hexdump8(const void *ptr, size_t len);
 
-/* input */
-int dgetc(char *c, bool wait);
+#else
+
+/* input/output */
+static inline void _dputc(char c) { }
+static inline int _dputs(const char *str) { return 0; }
+static inline int __PRINTFLIKE(1, 2) _dprintf(const char *fmt, ...) { return 0; }
+static inline int _dvprintf(const char *fmt, va_list ap) { return 0; }
+
+/* dump memory */
+static inline void hexdump(const void *ptr, size_t len) { }
+static inline void hexdump8(const void *ptr, size_t len) { }
+
+#endif /* DISABLE_DEBUG_OUTPUT */
+
+#define COLOR_RED "\e[31m"
+#define COLOR_YELLOW "\e[33m"
+#define COLOR_RESET "\e[0m"
+
+#define LOG_COLOR_SET(level) { \
+	if((level)==CRITICAL) _dputs(COLOR_RED); \
+	else if((level)==SPEW) _dputs(COLOR_YELLOW); \
+}
+
+#define dputc(level, str) do { if ((level) <= LK_DEBUGLEVEL) { _dputc(str); } } while (0)
+#define dputs(level, str) do { if ((level) <= LK_DEBUGLEVEL) { _dputs(str); } } while (0)
+#define dprintf(level, x...) do { if ((level) <= LK_DEBUGLEVEL) { LOG_COLOR_SET(level); _dprintf(x); _dputs(COLOR_RESET); } } while (0)
+#define dvprintf(level, x...) do { if ((level) <= LK_DEBUGLEVEL) { LOG_COLOR_SET(level); _dvprintf(x); _dputs(COLOR_RESET); } } while (0)
 
 /* systemwide halts */
-void halt(void);
+void halt(void) __NO_RETURN;
 
 #if WITH_DEBUG_LOG_BUF
 /* lk_log */
@@ -71,11 +89,12 @@ char* lk_log_getbuf(void);
 unsigned lk_log_getsize(void);
 #endif
 
-void _panic(void *caller, const char *fmt, ...) __PRINTFLIKE(2, 3);
+void _panic(void *caller, const char *fmt, ...) __PRINTFLIKE(2, 3) __NO_RETURN;
 #define panic(x...) _panic(__GET_CALLER(), x)
 
 #define PANIC_UNIMPLEMENTED panic("%s unimplemented\n", __PRETTY_FUNCTION__)
 
+#if WITH_PLATFORM_MSM_SHARED
 void * __stack_chk_guard;
 
 /*
@@ -85,30 +104,11 @@ void * __stack_chk_guard;
 
 void __attribute__ ((noreturn))
 	__stack_chk_fail (void);
+#endif
 
 /* spin the cpu for a period of (short) time */
 void spin(uint32_t usecs);
 
-/* dump memory */
-void hexdump(const void *ptr, size_t len);
-void hexdump8(const void *ptr, size_t len);
-
-/* trace routines */
-#define TRACE_ENTRY printf("%s: entry\n", __PRETTY_FUNCTION__)
-#define TRACE_EXIT printf("%s: exit\n", __PRETTY_FUNCTION__)
-#define TRACE_ENTRY_OBJ printf("%s: entry obj %p\n", __PRETTY_FUNCTION__, this)
-#define TRACE_EXIT_OBJ printf("%s: exit obj %p\n", __PRETTY_FUNCTION__, this)
-#define TRACE printf("%s:%d\n", __PRETTY_FUNCTION__, __LINE__)
-#define TRACEF(x...) do { printf("%s:%d: ", __PRETTY_FUNCTION__, __LINE__); printf(x); } while (0)
-
-/* trace routines that work if LOCAL_TRACE is set */
-#define LTRACE_ENTRY do { if (LOCAL_TRACE) { TRACE_ENTRY; } } while (0)
-#define LTRACE_EXIT do { if (LOCAL_TRACE) { TRACE_EXIT; } } while (0)
-#define LTRACE do { if (LOCAL_TRACE) { TRACE; } } while (0)
-#define LTRACEF(x...) do { if (LOCAL_TRACE) { TRACEF(x); } } while (0)
-
-#if defined(__cplusplus)
-}
-#endif
+__END_CDECLS
 
 #endif

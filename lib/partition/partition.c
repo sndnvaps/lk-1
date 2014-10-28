@@ -21,7 +21,7 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #include <debug.h>
-#include <printf.h>
+#include <stdio.h>
 #include <string.h>
 #include <compiler.h>
 #include <stdlib.h>
@@ -80,7 +80,7 @@ int partition_publish(const char *device, off_t offset)
 
 	// get a dma aligned and padded block to read info
 	STACKBUF_DMA_ALIGN(buf, dev->block_size);
-	
+
 	/* sniff for MBR partition types */
 	do {
 		int i;
@@ -97,7 +97,7 @@ int partition_publish(const char *device, off_t offset)
 		struct mbr_part part[4];
 		memcpy(part, buf + 446, sizeof(part));
 
-#if DEBUGLEVEL >= INFO
+#if LK_DEBUGLEVEL >= INFO
 		dprintf(INFO, "mbr partition table dump:\n");
 		for (i=0; i < 4; i++) {
 			dprintf(INFO, "\t%i: status 0x%hhx, type 0x%hhx, start 0x%x, len 0x%x\n", i, part[i].status, part[i].type, part[i].lba_start, part[i].lba_length);
@@ -110,7 +110,7 @@ int partition_publish(const char *device, off_t offset)
 				// publish it
 				char subdevice[128];
 
-				sprintf(subdevice, "%sp%d", device, i); 
+				sprintf(subdevice, "%sp%d", device, i);
 
 				err = bio_publish_subdevice(device, subdevice, part[i].lba_start, part[i].lba_length);
 				if (err < 0) {
@@ -120,7 +120,7 @@ int partition_publish(const char *device, off_t offset)
 				count++;
 			}
 		}
-	} while(0);
+	} while (0);
 
 	bio_close(dev);
 
@@ -133,7 +133,7 @@ int partition_unpublish(const char *device)
 	int i;
 	int count;
 	bdev_t *dev;
-	char devname[512];	
+	char devname[512];
 
 	count = 0;
 	for (i=0; i < 16; i++) {

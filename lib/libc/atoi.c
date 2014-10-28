@@ -1,4 +1,4 @@
-/* 
+/*
 ** Copyright 2001, Travis Geiselbrecht. All rights reserved.
 ** Distributed under the terms of the NewOS License.
 */
@@ -38,7 +38,7 @@ static int hexval(char c)
 		return c - 'a' + 10;
 	else if (c >= 'A' && c <= 'F')
 		return c - 'A' + 10;
-		
+
 	return 0;
 }
 
@@ -102,4 +102,22 @@ unsigned long atoul(const char *num)
 
 	return value;
 }
+
+unsigned long long atoull(const char *num)
+{
+	unsigned long long value = 0;
+	if (num[0] == '0' && num[1] == 'x') {
+		// hex
+		num += 2;
+		while (*num && isxdigit(*num))
+			value = value * 16 + hexval(*num++);
+	} else {
+		// decimal
+		while (*num && isdigit(*num))
+			value = value * 10 + *num++  - '0';
+	}
+
+	return value;
+}
+
 

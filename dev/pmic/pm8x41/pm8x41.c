@@ -26,14 +26,25 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <err.h>
 #include <bits.h>
 #include <debug.h>
+#include <assert.h>
 #include <reg.h>
 #include <spmi.h>
+#include <platform/msm_shared/timer.h>
 #include <string.h>
 #include <pm8x41_hw.h>
 #include <pm8x41.h>
 #include <platform/timer.h>
+
+static uint8_t mpp_slave_id;
+
+uint8_t pmi8994_config_mpp_slave_id(uint8_t slave_id)
+{
+	mpp_slave_id = slave_id;
+	return NO_ERROR;
+}
 
 /* SPMI helper functions */
 uint8_t pm8x41_reg_read(uint32_t addr)
@@ -74,7 +85,7 @@ void pm8x41_reg_write(uint32_t addr, uint8_t val)
 /* Exported functions */
 
 /* Set the boot done flag */
-void pm8x41_set_boot_done()
+void pm8x41_set_boot_done(void)
 {
 	uint8_t val;
 
@@ -149,8 +160,87 @@ int pm8x41_gpio_set(uint8_t gpio, uint8_t value)
 	return 0;
 }
 
+/* Configure PM and PMI GPIO with slave id */
+int pm8x41_gpio_config_sid(uint8_t sid, uint8_t gpio, struct pm8x41_gpio *config)
+{
+	uint8_t  val;
+	uint32_t gpio_base = GPIO_N_PERIPHERAL_BASE(gpio);
+
+	gpio_base &= 0x0ffff;	/* clear sid */
+	gpio_base |= (sid << 16);	/* add sid */
+
+	dprintf(SPEW, "%s: gpio=%d base=%x\n", __func__, gpio, gpio_base);
+
+	/* Disable the GPIO */
+	val  = REG_READ(gpio_base + GPIO_EN_CTL);
+	val &= ~BIT(PERPH_EN_BIT);
+	REG_WRITE(gpio_base + GPIO_EN_CTL, val);
+
+	/* Select the mode */
+	val = config->function | (config->direction << 4);
+	REG_WRITE(gpio_base + GPIO_MODE_CTL, val);
+
+	/* Set the right pull */
+	val = config->pull;
+	REG_WRITE(gpio_base + GPIO_DIG_PULL_CTL, val);
+
+	/* Select the VIN */
+	val = config->vin_sel;
+	REG_WRITE(gpio_base + GPIO_DIG_VIN_CTL, val);
+
+	if (config->direction == PM_GPIO_DIR_OUT) {
+		/* Set the right dig out control */
+		val = config->out_strength | (config->output_buffer << 4);
+		REG_WRITE(gpio_base + GPIO_DIG_OUT_CTL, val);
+	}
+
+	/* Enable the GPIO */
+	val  = REG_READ(gpio_base + GPIO_EN_CTL);
+	val |= BIT(PERPH_EN_BIT);
+	REG_WRITE(gpio_base + GPIO_EN_CTL, val);
+
+	return 0;
+}
+
+/* Reads the status of requested gpio */
+int pm8x41_gpio_get_sid(uint8_t sid, uint8_t gpio, uint8_t *status)
+{
+	uint32_t gpio_base = GPIO_N_PERIPHERAL_BASE(gpio);
+
+	gpio_base &= 0x0ffff;	/* clear sid */
+	gpio_base |= (sid << 16);	/* add sid */
+
+	*status = REG_READ(gpio_base + GPIO_STATUS);
+
+	/* Return the value of the GPIO pin */
+	*status &= BIT(GPIO_STATUS_VAL_BIT);
+
+	dprintf(SPEW, "GPIO %d status is %d\n", gpio, *status);
+
+	return 0;
+}
+
+/* Write the output value of the requested gpio */
+int pm8x41_gpio_set_sid(uint8_t sid, uint8_t gpio, uint8_t value)
+{
+	uint32_t gpio_base = GPIO_N_PERIPHERAL_BASE(gpio);
+	uint8_t val;
+
+	gpio_base &= 0x0ffff;	/* clear sid */
+	gpio_base |= (sid << 16);	/* add sid */
+
+	dprintf(SPEW, "%s: gpio=%d base=%x\n", __func__, gpio, gpio_base);
+
+	/* Set the output value of the gpio */
+	val = REG_READ(gpio_base + GPIO_MODE_CTL);
+	val = (val & ~PM_GPIO_OUTPUT_MASK) | value;
+	REG_WRITE(gpio_base + GPIO_MODE_CTL, val);
+
+	return 0;
+}
+
 /* Prepare PON RESIN S2 reset (bite) */
-void pm8x41_resin_s2_reset_enable()
+void pm8x41_resin_s2_reset_enable(void)
 {
 	uint8_t val;
 
@@ -177,7 +267,7 @@ void pm8x41_resin_s2_reset_enable()
 }
 
 /* Disable PON RESIN S2 reset. (bite)*/
-void pm8x41_resin_s2_reset_disable()
+void pm8x41_resin_s2_reset_disable(void)
 {
 	/* disable s2 reset */
 	REG_WRITE(PON_RESIN_N_RESET_S2_CTL, 0x0);
@@ -187,7 +277,7 @@ void pm8x41_resin_s2_reset_disable()
 }
 
 /* Resin irq status for faulty pmic*/
-uint32_t pm8x41_v2_resin_status()
+uint32_t pm8x41_v2_resin_status(void)
 {
 	uint8_t rt_sts = 0;
 
@@ -220,7 +310,7 @@ uint32_t pm8x41_resin_status()
 }
 
 /* Return 1 if power key is pressed */
-uint32_t pm8x41_get_pwrkey_is_pressed()
+uint32_t pm8x41_get_pwrkey_is_pressed(void)
 {
 	uint8_t pwr_sts = 0;
 
@@ -370,43 +460,65 @@ void pm8x41_lpg_write(uint8_t chan, uint8_t off, uint8_t val)
 	REG_WRITE(lpg_base + off, val);
 }
 
-uint8_t pm8x41_get_pmic_rev()
+/*
+ * pmi lpg channel register write with slave_id:
+ */
+void pm8x41_lpg_write_sid(uint8_t sid, uint8_t chan, uint8_t off, uint8_t val)
+{
+	uint32_t lpg_base = LPG_N_PERIPHERAL_BASE(chan);
+
+	lpg_base &= 0x0ffff;	/* clear sid */
+	lpg_base |= (sid << 16);	/* add sid */
+
+	dprintf(SPEW, "%s: lpg=%d base=%x\n", __func__, chan, lpg_base);
+
+	REG_WRITE(lpg_base + off, val);
+}
+
+uint8_t pm8x41_get_pmic_rev(void)
 {
 	return REG_READ(REVID_REVISION4);
 }
 
-uint8_t pm8x41_get_pon_reason()
+uint8_t pm8x41_get_pon_reason(void)
 {
 	return REG_READ(PON_PON_REASON1);
 }
 
-uint8_t pm8x41_get_pon_poff_reason1()
+uint8_t pm8x41_get_pon_poff_reason1(void)
 {
 	return REG_READ(PON_POFF_REASON1);
 }
 
-uint8_t pm8x41_get_pon_poff_reason2()
+uint8_t pm8x41_get_pon_poff_reason2(void)
 {
 	return REG_READ(PON_POFF_REASON2);
+}
+
+void pm8x41_enable_mvs(struct pm8x41_mvs *mvs, enum mvs_en_ctl enable)
+{
+	ASSERT(mvs);
+
+	REG_WRITE(mvs->base + MVS_EN_CTL, enable << MVS_EN_CTL_ENABLE_SHIFT);
 }
 
 void pm8x41_enable_mpp(struct pm8x41_mpp *mpp, enum mpp_en_ctl enable)
 {
 	ASSERT(mpp);
 
-	REG_WRITE(mpp->base + MPP_EN_CTL, enable << MPP_EN_CTL_ENABLE_SHIFT);
+	REG_WRITE(((mpp->base + MPP_EN_CTL) + (mpp_slave_id << 16)), enable << MPP_EN_CTL_ENABLE_SHIFT);
 }
 
 void pm8x41_config_output_mpp(struct pm8x41_mpp *mpp)
 {
 	ASSERT(mpp);
 
-	REG_WRITE(mpp->base + MPP_DIG_VIN_CTL, mpp->vin);
+	REG_WRITE(((mpp->base + MPP_DIG_VIN_CTL) + (mpp_slave_id << 16)), mpp->vin);
 
-	REG_WRITE(mpp->base + MPP_MODE_CTL, mpp->mode | (MPP_DIGITAL_OUTPUT << MPP_MODE_CTL_MODE_SHIFT));
+	REG_WRITE(((mpp->base + MPP_MODE_CTL) + (mpp_slave_id << 16)), mpp->mode | (MPP_DIGITAL_OUTPUT << MPP_MODE_CTL_MODE_SHIFT));
 }
 
-uint8_t pm8x41_get_is_cold_boot()
+uint8_t pm8x41_get_is_cold_boot(void)
 {
 	if (REG_READ(PON_WARMBOOT_STATUS1) || REG_READ(PON_WARMBOOT_STATUS2)) {
 		dprintf(INFO,"%s: Warm boot\n", __func__);
@@ -460,7 +572,7 @@ void pm8x41_clear_pmic_watchdog(void)
 }
 
 /* API to check for borken battery */
-int pm8xxx_is_battery_broken()
+int pm8xxx_is_battery_broken(void)
 {
 	uint8_t trkl_default = 0;
 	uint8_t vbat_det_default = 0;

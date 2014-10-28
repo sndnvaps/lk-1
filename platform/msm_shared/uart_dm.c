@@ -29,6 +29,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <debug.h>
+#include <assert.h>
 #include <kernel/thread.h>
 #include <reg.h>
 #include <sys/types.h>
@@ -39,6 +40,8 @@
 #include <platform/gpio.h>
 #include <uart_dm.h>
 #include <gsbi.h>
+#include <platform/msm_shared/timer.h>
+#include <platform.h>
 
 #ifndef NULL
 #define NULL        0
@@ -110,9 +113,6 @@ static unsigned int msm_boot_uart_dm_reset(uint32_t base);
  */
 static uint32_t port_lookup[4];
 
-/* Extern functions */
-void udelay(unsigned usecs);
-
 /*
  * Helper function to keep track of Line Feed char "\n" with
  * Carriage Return "\r\n".
@@ -121,9 +121,9 @@ static unsigned int
 msm_boot_uart_calculate_num_chars_to_write(char *data_in,
 				 uint32_t *num_of_chars)
 {
-	int i = 0, j = 0;
+	unsigned i = 0, j = 0;
 
-	if ((data_in == NULL) || (*num_of_chars < 0)) {
+	if (data_in == NULL) {
 		return MSM_BOOT_UART_DM_E_INVAL;
 	}
 
@@ -357,7 +357,7 @@ msm_boot_uart_dm_write(uint32_t base, char *data, unsigned int num_of_chars)
 
 	for (i = 0; i < (int)tx_word_count; i++) {
 		tx_char = (tx_char_left < 4) ? tx_char_left : 4;
-		num_chars_written = pack_chars_into_words(tx_data, tx_char, &tx_word);
+		num_chars_written = pack_chars_into_words((uint8_t*)tx_data, tx_char, &tx_word);
 
 		/* Wait till TX FIFO has space */
 		while (!(readl(MSM_BOOT_UART_DM_SR(base)) & MSM_BOOT_UART_DM_SR_TXRDY)) {
@@ -438,6 +438,9 @@ int uart_putc(int port, char c)
 	return 0;
 }
 
+static int has_cbuf = 0;
+static int cbuf = 0;
+
 /* UART_DM uses four character word FIFO whereas uart_getc
  * is supposed to read only one character. So we need to
  * read a word and keep track of each character in the word.
@@ -452,6 +455,12 @@ int uart_getc(int port, bool wait)
 	if (!uart_init_flag)
 		return -1;
 
+	if(has_cbuf) {
+		byte = cbuf;
+		has_cbuf = 0;
+		goto finish;
+	}
+
 	if (!word) {
 		/* Read from FIFO only if it's a first read or all the four
 		 * characters out of a word have been read */
@@ -464,15 +473,17 @@ int uart_getc(int port, bool wait)
 	byte = (int)word & 0xff;
 	word = word >> 8;
 
+finish:
 	return byte;
 }
 
 int uart_tstc(int port) {
-		uint32_t base = port_lookup[port];
-
 	/* Don't do anything if UART is not initialized */
 	if (!uart_init_flag)
 		return -1;
 
-	return (readl(MSM_BOOT_UART_DM_SR(base)) & MSM_BOOT_UART_DM_SR_RXRDY);
+	cbuf = uart_getc(port, 0);
+	has_cbuf = (cbuf >= 0);
+
+	return has_cbuf;
 }

@@ -31,6 +31,7 @@
  */
 
 #include <debug.h>
+#include <assert.h>
 #include <lib/gfx.h>
 #include <lib/gfxconsole.h>
 #include <lib/font.h>
@@ -60,9 +61,8 @@ static void gfxconsole_putc(char c)
 	static uint32_t p_num = 0;
 
 	switch (state) {
-		case NORMAL:
-		{
-			if(c == '\n' || c == '\r') {
+		case NORMAL: {
+			if (c == '\n' || c == '\r') {
 				gfxconsole.x = 0;
 				gfxconsole.y++;
 			} else if (c == 0x1b) {
@@ -75,8 +75,7 @@ static void gfxconsole_putc(char c)
 			break;
 		}
 
-		case ESCAPE:
-		{
+		case ESCAPE: {
 			if (c >= '0' && c <= '9') {
 				p_num = (p_num * 10) + (c - '0');
 			} else if (c == 'D') {
@@ -94,11 +93,11 @@ static void gfxconsole_putc(char c)
 		}
 	}
 
-	if(gfxconsole.x >= gfxconsole.columns) {
+	if (gfxconsole.x >= gfxconsole.columns) {
 		gfxconsole.x = 0;
 		gfxconsole.y++;
 	}
-	if(gfxconsole.y >= gfxconsole.rows) {
+	if (gfxconsole.y >= gfxconsole.rows) {
 		// scroll up
 		gfx_copyrect(gfxconsole.surface, 0, FONT_Y, gfxconsole.surface->width, gfxconsole.surface->height - FONT_Y - gfxconsole.extray, 0, 0);
 		gfxconsole.y--;
@@ -136,7 +135,7 @@ void gfxconsole_start(gfx_surface *surface)
 	gfxconsole.back_color = 0;
 
 	// register for debug callbacks
-	register_debug_output(&gfxconsole_putc);
+	//register_debug_output(&gfxconsole_putc);
 }
 
 /**

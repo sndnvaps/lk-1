@@ -33,6 +33,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <debug.h>
+#include <assert.h>
 #include <platform.h>
 #include <platform/iomap.h>
 #include <platform/irqs.h>
@@ -42,6 +43,10 @@
 #include <reg.h>
 #include <dev/udc.h>
 #include "hsusb.h"
+
+#if WITH_APP_DISPLAY_SERVER
+#include <app/display_server.h>
+#endif
 
 #define MAX_TD_XFER_SIZE  (16 * 1024)
 
@@ -147,6 +152,7 @@ struct ept_queue_head *epts = 0;
 
 static int usb_online = 0;
 static int usb_highspeed = 0;
+static int usb_suspend = 1;
 
 static struct udc_device *the_device;
 static struct udc_gadget *the_gadget;
@@ -308,7 +314,7 @@ int udc_request_queue(struct udc_endpoint *ept, struct udc_request *_req)
 					ROUNDUP(sizeof(struct ept_queue_item), CACHE_LINE));
 			if (!item) {
 				dprintf(ALWAYS, "allocate USB item fail ept%d"
-							"%s queue\n",
+							"%s queue\n"
 							"td count = %d\n",
 							ept->num,
 							ept->in ? "in" : "out",
@@ -316,12 +322,12 @@ int udc_request_queue(struct udc_endpoint *ept, struct udc_request *_req)
 				return -1;
 			} else {
 				count ++;
-				curr_item->next = PA(item);
+				curr_item->next = PA((addr_t)item);
 				item->next = TERMINATE;
 			}
 		} else
 			/* Since next TD in chain already exists */
-			item = VA(curr_item->next);
+			item = (void*)VA((addr_t)curr_item->next);
 
 		/* Update TD with transfer information */
 		item->info = INFO_BYTES(xfer) | INFO_ACTIVE;
@@ -340,7 +346,7 @@ int udc_request_queue(struct udc_endpoint *ept, struct udc_request *_req)
 	curr_item->next = TERMINATE;
 	curr_item->info |= INFO_IOC;
 	enter_critical_section();
-	ept->head->next = PA(req->item);
+	ept->head->next = PA((addr_t)req->item);
 	ept->head->info = 0;
 	ept->req = req;
 	arch_clean_invalidate_cache_range((addr_t) ept,
@@ -349,7 +355,7 @@ int udc_request_queue(struct udc_endpoint *ept, struct udc_request *_req)
 					  sizeof(struct ept_queue_head));
 	arch_clean_invalidate_cache_range((addr_t) ept->req,
 					  sizeof(struct usb_request));
-	arch_clean_invalidate_cache_range((addr_t) VA(req->req.buf),
+	arch_clean_invalidate_cache_range((addr_t) VA((addr_t)req->req.buf),
 					  req->req.length);
 
 	item = req->item;
@@ -359,7 +365,7 @@ int udc_request_queue(struct udc_endpoint *ept, struct udc_request *_req)
 		if (curr_item->next == TERMINATE)
 			item = NULL;
 		else
-			item = curr_item->next;
+			item = (void*)curr_item->next;
 		arch_clean_invalidate_cache_range((addr_t) curr_item,
 					  sizeof(struct ept_queue_item));
 	}
@@ -374,9 +380,8 @@ static void handle_ept_complete(struct udc_endpoint *ept)
 {
 	struct ept_queue_item *item;
 	unsigned actual, total_len;
-	int status, len;
+	int status;
 	struct usb_request *req=NULL;
-	void *buf;
 
 	DBG("ept%d %s complete req=%p\n",
 	    ept->num, ept->in ? "in" : "out", ept->req);
@@ -386,13 +391,13 @@ static void handle_ept_complete(struct udc_endpoint *ept)
 
 	if(ept->req)
 	{
-		req = VA(ept->req);
+		req = (void*)VA((addr_t)ept->req);
 		arch_invalidate_cache_range((addr_t) ept->req,
 						sizeof(struct usb_request));
 	}
 
 	if (req) {
-		item = VA(req->item);
+		item = (void*)VA((addr_t)req->item);
 		/* total transfer length for transacation */
 		total_len = req->req.length;
 		ept->req = 0;
@@ -426,8 +431,7 @@ static void handle_ept_complete(struct udc_endpoint *ept)
 				/*
 				 * Record the data transferred for the last TD
 				 */
-				actual += total_len - (item->info >> 16)
-								& 0x7FFF;
+				actual += total_len - ((item->info >> 16) & 0x7FFF);
 				total_len = 0;
 				break;
 			} else {
@@ -437,10 +441,10 @@ static void handle_ept_complete(struct udc_endpoint *ept)
 				 * TD woulb the max possible TD transfer size
 				 * (16K)
 				 */
-				actual += MAX_TD_XFER_SIZE - (item->info >> 16) & 0x7FFF;
-				total_len -= MAX_TD_XFER_SIZE - (item->info >> 16) & 0x7FFF;
+				actual += MAX_TD_XFER_SIZE - ((item->info >> 16) & 0x7FFF);
+				total_len -= MAX_TD_XFER_SIZE - ((item->info >> 16) & 0x7FFF);
 				/*Move to next item in chain*/
-				item = VA(item->next);
+				item = (void*)VA(item->next);
 			}
 		}
 		status = 0;
@@ -482,7 +486,7 @@ static struct udc_endpoint *ep0in, *ep0out;
 static struct udc_request *ep0req;
 
 static void
-ep0_setup_ack_complete()
+ep0_setup_ack_complete(struct udc_request *req, unsigned actual, int status)
 {
 	uint32_t mode;
 
@@ -526,7 +530,7 @@ static void setup_tx(void *buf, unsigned len)
 {
 	DBG("setup_tx %p %d\n", buf, len);
 	memcpy(ep0req->buf, buf, len);
-	ep0req->buf = PA((addr_t)ep0req->buf);
+	ep0req->buf = (void*)PA((addr_t)ep0req->buf);
 	ep0req->complete = ep0in_complete;
 	ep0req->length = len;
 	udc_request_queue(ep0in, ep0req);
@@ -771,6 +775,7 @@ enum handler_return udc_interrupt(void *arg)
 	}
 	if (n & STS_SLI) {
 		DBG("-- suspend --\n");
+		usb_suspend = 1;
 	}
 	if (n & STS_PCI) {
 		dprintf(INFO, "-- portchange --\n");
@@ -780,6 +785,7 @@ enum handler_return udc_interrupt(void *arg)
 		} else {
 			usb_highspeed = 0;
 		}
+		usb_suspend = 0;
 	}
 	if (n & STS_UEI) {
 		DBG("STS_UEI\n");
@@ -810,6 +816,11 @@ enum handler_return udc_interrupt(void *arg)
 			}
 		}
 	}
+
+#if WITH_APP_DISPLAY_SERVER
+	display_server_refresh();
+#endif
+
 	return ret;
 }
 
@@ -947,4 +958,8 @@ int udc_stop(void)
 	while(readl(USB_USBCMD) & USBCMD_RESET);
 
 	return 0;
+}
+
+int usb_is_connected(void) {
+	return usb_online && !usb_suspend;
 }

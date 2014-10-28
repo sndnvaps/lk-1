@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2009 Travis Geiselbrecht
+ * Copyright (c) 2008-2014 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -26,8 +26,11 @@
 #include <sys/types.h>
 #include <list.h>
 #include <compiler.h>
+#include <arch/defines.h>
 #include <arch/ops.h>
 #include <arch/thread.h>
+#include <kernel/wait.h>
+#include <debug.h>
 
 enum thread_state {
 	THREAD_SUSPENDED = 0,
@@ -45,6 +48,10 @@ enum thread_tls_list {
 	MAX_TLS_ENTRY
 };
 
+#define THREAD_FLAG_DETACHED 0x1
+#define THREAD_FLAG_FREE_STACK 0x2
+#define THREAD_FLAG_FREE_STRUCT 0x4
+
 #define THREAD_MAGIC 'thrd'
 
 typedef struct thread {
@@ -54,9 +61,10 @@ typedef struct thread {
 	/* active bits */
 	struct list_node queue_node;
 	int priority;
-	enum thread_state state;	
+	enum thread_state state;
 	int saved_critical_section_count;
 	int remaining_quantum;
+	unsigned int flags;
 
 	/* if blocked, a pointer to the wait queue */
 	struct wait_queue *blocking_wait_queue;
@@ -75,6 +83,7 @@ typedef struct thread {
 
 	/* return code */
 	int retcode;
+	struct wait_queue retcode_wait_queue;
 
 	/* thread local storage */
 	uint32_t tls[MAX_TLS_ENTRY];
@@ -93,7 +102,11 @@ typedef struct thread {
 #define HIGH_PRIORITY ((NUM_PRIORITIES / 4) * 3)
 
 /* stack size */
-#define DEFAULT_STACK_SIZE 8192
+#ifdef CUSTOM_DEFAULT_STACK_SIZE
+#define DEFAULT_STACK_SIZE CUSTOM_DEFAULT_STACK_SIZE
+#else
+#define DEFAULT_STACK_SIZE ARCH_DEFAULT_STACK_SIZE
+#endif
 
 /* functions */
 void thread_init_early(void);
@@ -102,9 +115,13 @@ void thread_become_idle(void) __NO_RETURN;
 void thread_set_name(const char *name);
 void thread_set_priority(int priority);
 thread_t *thread_create(const char *name, thread_start_routine entry, void *arg, int priority, size_t stack_size);
+thread_t *thread_create_etc(thread_t *t, const char *name, thread_start_routine entry, void *arg, int priority, void *stack, size_t stack_size);
 status_t thread_resume(thread_t *);
 void thread_exit(int retcode) __NO_RETURN;
-void thread_sleep(time_t delay);
+void thread_sleep(lk_time_t delay);
+status_t thread_detach(thread_t *t);
+status_t thread_join(thread_t *t, int *retcode, lk_time_t timeout);
+status_t thread_detach_and_resume(thread_t *t);
 
 void dump_thread(thread_t *t);
 void dump_all_threads(void);
@@ -118,30 +135,33 @@ void thread_block(void); /* block on something and reschedule */
 enum handler_return thread_timer_tick(void);
 
 /* the current thread */
-extern thread_t *current_thread;
-
-/* the idle thread */
-extern thread_t *idle_thread;
+thread_t *get_current_thread(void);
+void set_current_thread(thread_t *);
 
 /* critical sections */
 extern int critical_section_count;
 
 static inline __ALWAYS_INLINE void enter_critical_section(void)
 {
-	critical_section_count++;
-	if (critical_section_count == 1)
+	CF;
+	if (critical_section_count == 0)
 		arch_disable_ints();
+	critical_section_count++;
+	CF;
 }
 
 static inline __ALWAYS_INLINE void exit_critical_section(void)
 {
+	CF;
 	critical_section_count--;
 	if (critical_section_count == 0)
 		arch_enable_ints();
+	CF;
 }
 
 static inline __ALWAYS_INLINE bool in_critical_section(void)
 {
+	CF;
 	return critical_section_count > 0;
 }
 
@@ -152,68 +172,26 @@ static inline void dec_critical_section(void) { critical_section_count--; }
 /* thread local storage */
 static inline __ALWAYS_INLINE uint32_t tls_get(uint entry)
 {
-	return current_thread->tls[entry];
+	return get_current_thread()->tls[entry];
 }
 
 static inline __ALWAYS_INLINE uint32_t tls_set(uint entry, uint32_t val)
 {
-	uint32_t oldval = current_thread->tls[entry];
-	current_thread->tls[entry] = val;
+	uint32_t oldval = get_current_thread()->tls[entry];
+	get_current_thread()->tls[entry] = val;
 	return oldval;
 }
 
-/* wait queue stuff */
-#define WAIT_QUEUE_MAGIC 'wait'
-
-typedef struct wait_queue {
-	int magic;
-	struct list_node list;
-	int count;
-} wait_queue_t;
-
-/* wait queue primitive */
-/* NOTE: must be inside critical section when using these */
-void wait_queue_init(wait_queue_t *);
-
-/* 
- * release all the threads on this wait queue with a return code of ERR_OBJECT_DESTROYED.
- * the caller must assure that no other threads are operating on the wait queue during or
- * after the call.
- */
-void wait_queue_destroy(wait_queue_t *, bool reschedule);
-
-/*
- * block on a wait queue.
- * return status is whatever the caller of wait_queue_wake_*() specifies.
- * a timeout other than INFINITE_TIME will set abort after the specified time
- * and return ERR_TIMED_OUT. a timeout of 0 will immediately return.
- */
-status_t wait_queue_block(wait_queue_t *, time_t timeout);
-
-/* 
- * release one or more threads from the wait queue.
- * reschedule = should the system reschedule if any is released.
- * wait_queue_error = what wait_queue_block() should return for the blocking thread.
- */
-int wait_queue_wake_one(wait_queue_t *, bool reschedule, status_t wait_queue_error);
-int wait_queue_wake_all(wait_queue_t *, bool reschedule, status_t wait_queue_error);
-
-/* 
- * remove the thread from whatever wait queue it's in.
- * return an error if the thread is not currently blocked (or is the current thread) 
- */
-status_t thread_unblock_from_wait_queue(thread_t *t, bool reschedule, status_t wait_queue_error);
-
 /* thread level statistics */
-#if DEBUGLEVEL > 1
+#if LK_DEBUGLEVEL > 1
 #define THREAD_STATS 1
 #else
 #define THREAD_STATS 0
 #endif
 #if THREAD_STATS
 struct thread_stats {
-	bigtime_t idle_time;
-	bigtime_t last_idle_timestamp;
+	lk_bigtime_t idle_time;
+	lk_bigtime_t last_idle_timestamp;
 	int reschedules;
 	int context_switches;
 	int preempts;
@@ -224,6 +202,12 @@ struct thread_stats {
 };
 
 extern struct thread_stats thread_stats;
+
+#define THREAD_STATS_INC(name) do { thread_stats.name++; } while(0)
+
+#else
+
+#define THREAD_STATS_INC(name) do { } while (0)
 
 #endif
 

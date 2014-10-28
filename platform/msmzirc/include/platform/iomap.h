@@ -36,8 +36,8 @@
 
 #define APPS_SS_BASE                0x0B000000
 
-#define MSM_IOMAP_BASE              0x0078000
-#define MSM_IOMAP_END               0x0BFFFFFF
+#define MSM_IOMAP_BASE              0x00000000
+#define MSM_IOMAP_END               0x80000000
 
 #define SYSTEM_IMEM_BASE            0x08600000
 #define MSM_SHARED_IMEM_BASE        0x08600000
@@ -47,7 +47,7 @@
 #define BS_INFO_ADDR                (MSM_SHARED_IMEM_BASE + BS_INFO_OFFSET)
 #define SDRAM_START_ADDR            0x80000000
 
-#define MSM_SHARED_BASE             0x010C0000
+#define MSM_SHARED_BASE             0x87E80000
 
 #define MSM_GIC_DIST_BASE           APPS_SS_BASE
 #define MSM_GIC_CPU_BASE            (APPS_SS_BASE + 0x2000)
@@ -68,6 +68,7 @@
 #define SDCC_HC_PWRCTL_CTL_REG      (0x000000E8)
 #define BLSP1_UART0_BASE            (PERIPH_SS_BASE + 0x000AF000)
 #define BLSP1_UART1_BASE            (PERIPH_SS_BASE + 0x000B0000)
+#define BLSP1_UART2_BASE            (PERIPH_SS_BASE + 0x000B1000)
 #define MSM_USB30_BASE              0x08A00000
 #define MSM_USB30_QSCRATCH_BASE     0x08AF8800
 
@@ -127,8 +128,8 @@
 
 #define BLSP1_UART3_APPS_CBCR       (CLK_CTL_BASE + 0x403C)
 #define BLSP1_UART3_APPS_CMD_RCGR   (CLK_CTL_BASE + 0x4044)
-#define BLSP1_UART3_APPS_CFG_RCGR   (CLK_CTL_BASE + 0x4848)
-#define BLSP1_UART3_APPS_M          (CLK_CTL_BASE + 0x484C)
+#define BLSP1_UART3_APPS_CFG_RCGR   (CLK_CTL_BASE + 0x4048)
+#define BLSP1_UART3_APPS_M          (CLK_CTL_BASE + 0x404C)
 #define BLSP1_UART3_APPS_N          (CLK_CTL_BASE + 0x4050)
 #define BLSP1_UART3_APPS_D          (CLK_CTL_BASE + 0x4054)
 
@@ -156,6 +157,7 @@
 #define USB3_PIPE_CFG_RCGR          (CLK_CTL_BASE + 0x5E04C)
 #define USB_PHY_CFG_AHB_CBCR        (CLK_CTL_BASE + 0x5E080)
 #define USB3_PIPE_CBCR              (CLK_CTL_BASE + 0x5E040)
+#define USB3_PIPE_BCR               (CLK_CTL_BASE + 0x5E03C)
 
 #define USB3_AUX_CMD_RCGR           (CLK_CTL_BASE + 0x5E05C)
 #define USB3_AUX_CFG_RCGR           (CLK_CTL_BASE + 0x5E060)
@@ -171,6 +173,11 @@
 #define QUSB2_PHY_BASE              0x00079000
 #define QUSB2PHY_PORT_POWERDOWN     (QUSB2_PHY_BASE + 0x000000B4)
 #define GCC_QUSB2_PHY_BCR           (CLK_CTL_BASE + 0x00041028)
+#define QUSB2PHY_PORT_UTMI_CTRL2    (QUSB2_PHY_BASE + 0x000000C4)
+#define QUSB2PHY_PORT_TUNE1         (QUSB2_PHY_BASE + 0x00000080)
+#define QUSB2PHY_PORT_TUNE2         (QUSB2_PHY_BASE + 0x00000084)
+#define QUSB2PHY_PORT_TUNE3         (QUSB2_PHY_BASE + 0x00000088)
+#define QUSB2PHY_PORT_TUNE4         (QUSB2_PHY_BASE + 0x0000008C)
 
 /* SS QMP (Qulacomm Multi Protocol) */
 #define QMP_PHY_BASE                0x78000

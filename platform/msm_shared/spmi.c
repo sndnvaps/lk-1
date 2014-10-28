@@ -27,6 +27,8 @@
  */
 
 #include <debug.h>
+#include <assert.h>
+#include <malloc.h>
 #include <reg.h>
 #include <spmi.h>
 #include <bits.h>
@@ -44,11 +46,11 @@ static spmi_callback callback;
 static uint32_t pmic_arb_ver;
 static uint8_t *chnl_tbl;
 
-static void spmi_lookup_chnl_number()
+static void spmi_lookup_chnl_number(void)
 {
 	int i;
-	uint8_t slave_id;
-	uint8_t ppid_address;
+	uint8_t slave_id = 0;
+	uint8_t ppid_address = 0;
 	/* We need a max of sid (4 bits) + pid (8bits) of uint8_t's */
 	uint32_t chnl_tbl_sz = BIT(12) * sizeof(uint8_t);
 
@@ -95,7 +97,6 @@ static void write_wdata_from_array(uint8_t *array,
 {
 	uint32_t shift_value[] = {0, 8, 16, 24};
 	int i;
-	int j;
 	uint32_t val = 0;
 
 	/* Write to WDATA */
@@ -127,7 +128,7 @@ static void write_wdata_from_array(uint8_t *array,
 unsigned int pmic_arb_write_cmd(struct pmic_arb_cmd *cmd,
                                 struct pmic_arb_param *param)
 {
-	uint32_t bytes_written = 0;
+	uint8_t bytes_written = 0;
 	uint32_t error;
 	uint32_t val = 0;
 
@@ -207,8 +208,11 @@ static void read_rdata_into_array(uint8_t *array,
 	uint8_t shift_value[] = {0, 8, 16, 24};
 	int i;
 
-	val = readl(PMIC_ARB_CHNLn_RDATA(pmic_arb_chnl_num, reg_num));
-
+#if SPMI_CORE_V2
+		val = readl(PMIC_ARB_OBS_CHNLn_RDATA(pmic_arb_chnl_num, reg_num));
+#else
+		val = readl(PMIC_ARB_CHNLn_RDATA(pmic_arb_chnl_num, reg_num));
+#endif
 	/* Read at most 4 bytes */
 	for (i = 0; (i < 4) && (*bytes_read < array_size); i++)
 	{
@@ -238,7 +242,6 @@ unsigned int pmic_arb_read_cmd(struct pmic_arb_cmd *cmd,
 {
 	uint32_t val = 0;
 	uint32_t error;
-	uint32_t addr;
 	uint8_t bytes_read = 0;
 
 	/* Look up for pmic channel only for V2 hardware
@@ -250,8 +253,13 @@ unsigned int pmic_arb_read_cmd(struct pmic_arb_cmd *cmd,
 		pmic_arb_chnl_num = chnl_tbl[CHNL_IDX(cmd->slave_id, cmd->address)];
 	}
 
+
 	/* Disable IRQ mode for the current channel*/
-	writel(0x0, PMIC_ARB_CHNLn_CONFIG(pmic_arb_chnl_num));
+#if SPMI_CORE_V2
+		writel(0x0, PMIC_ARB_OBS_CHNLn_CONFIG(pmic_arb_chnl_num));
+#else
+		writel(0x0, PMIC_ARB_CHNLn_CONFIG(pmic_arb_chnl_num));
+#endif
 
 	/* Fill in the byte count for the command
 	 * Note: Byte count is one less than the number of bytes transferred.
@@ -269,10 +277,18 @@ unsigned int pmic_arb_read_cmd(struct pmic_arb_cmd *cmd,
 	val |= ((uint32_t)(cmd->offset) << PMIC_ARB_CMD_ADDR_OFFSET_SHIFT);
 	val |= ((uint32_t)(cmd->byte_cnt));
 
-	writel(val, PMIC_ARB_CHNLn_CMD0(pmic_arb_chnl_num));
+#if SPMI_CORE_V2
+		writel(val, PMIC_ARB_OBS_CHNLn_CMD0(pmic_arb_chnl_num));
+#else
+		writel(val, PMIC_ARB_CHNLn_CMD0(pmic_arb_chnl_num));
+#endif
 
 	/* Wait till CMD DONE status */
-	while (!(val = readl(PMIC_ARB_CHNLn_STATUS(pmic_arb_chnl_num))));
+#if SPMI_CORE_V2
+		while (!(val = readl(PMIC_ARB_OBS_CHNLn_STATUS(pmic_arb_chnl_num))));
+#else
+		while (!(val = readl(PMIC_ARB_CHNLn_STATUS(pmic_arb_chnl_num))));
+#endif
 
 	/* Check for errors */
 	error = val ^ (1 << PMIC_ARB_CMD_DONE);
@@ -342,7 +358,7 @@ int spmi_acc_irq(uint32_t periph_acc_irq, uint32_t status)
 		return 0;
 }
 
-void spmi_irq()
+enum handler_return spmi_irq(void* data)
 {
 	int i;
 	uint32_t status;
@@ -356,9 +372,11 @@ void spmi_irq()
 		if (status)
 			if (!spmi_acc_irq(i, status))
 				/* Not the correct interrupt, continue to wait */
-				return;
+				return INT_NO_RESCHEDULE;
 	}
 	mask_interrupt(EE0_KRAIT_HLOS_SPMI_PERIPH_IRQ);
+
+	return INT_NO_RESCHEDULE;
 }
 
 /* Enable interrupts on a particular peripheral: periph_id */
@@ -371,7 +389,7 @@ void spmi_enable_periph_interrupts(uint8_t periph_id)
 
 }
 
-void spmi_uninit()
+void spmi_uninit(void)
 {
 	mask_interrupt(EE0_KRAIT_HLOS_SPMI_PERIPH_IRQ);
 }

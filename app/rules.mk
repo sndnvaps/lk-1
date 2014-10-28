@@ -1,8 +1,8 @@
 LOCAL_DIR := $(GET_LOCAL_DIR)
 
-MODULES += \
-	lib/openssl
+MODULE := $(LOCAL_DIR)
 
-OBJS += \
-	$(LOCAL_DIR)/app.o
+MODULE_SRCS += \
+	$(LOCAL_DIR)/app.c
 
+include make/module.mk

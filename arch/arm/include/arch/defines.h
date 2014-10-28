@@ -36,6 +36,10 @@
  #define CACHE_LINE 32
 #elif defined(ARM_CPU_CORE_KRAIT) || defined(ARM_CPU_CORE_A7)
  #define CACHE_LINE 64
+#elif ARM_CPU_CORTEX_A9
+#define CACHE_LINE 32
+#elif ARM_CPU_CORTEX_M3 || ARM_CPU_CORTEX_M4
+#define CACHE_LINE 32 /* doesn't actually matter */
 #else
  #error unknown cpu
 #endif

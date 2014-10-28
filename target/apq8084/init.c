@@ -57,6 +57,7 @@
 #define PMIC_ARB_CHANNEL_NUM    0
 #define PMIC_ARB_OWNER_ID       0
 
+#define RECOVERY_MODE           0x77665502
 #define FASTBOOT_MODE           0x77665500
 
 #define BOOT_DEVICE_MASK(val)   ((val & 0x3E) >>1)
@@ -481,21 +482,32 @@ void set_liquid_baseband(struct board_data *board)
 	}
 }
 
+static uint8_t splash_override;
 /* Returns 1 if target supports continuous splash screen. */
 int target_cont_splash_screen()
 {
-	switch(board_hardware_id())
-	{
-		case HW_PLATFORM_SURF:
-		case HW_PLATFORM_MTP:
-		case HW_PLATFORM_FLUID:
-		case HW_PLATFORM_LIQUID:
-			dprintf(SPEW, "Target_cont_splash=1\n");
-			return 1;
-		default:
-			dprintf(SPEW, "Target_cont_splash=0\n");
-			return 0;
+	uint8_t splash_screen = 0;
+	if(!splash_override) {
+		switch(board_hardware_id())
+		{
+			case HW_PLATFORM_SURF:
+			case HW_PLATFORM_MTP:
+			case HW_PLATFORM_FLUID:
+			case HW_PLATFORM_LIQUID:
+				dprintf(SPEW, "Target_cont_splash=1\n");
+				splash_screen = 1;
+				break;
+			default:
+				dprintf(SPEW, "Target_cont_splash=0\n");
+				splash_screen = 0;
+		}
 	}
+	return splash_screen;
+}
+
+void target_force_cont_splash_disable(uint8_t override)
+{
+        splash_override = override;
 }
 
 /* Detect the modem type */
@@ -572,7 +584,7 @@ void reboot_device(unsigned reboot_reason)
 	/* Write the reboot reason */
 	writel(reboot_reason, RESTART_REASON_ADDR);
 
-	if(reboot_reason == FASTBOOT_MODE)
+	if(reboot_reason == FASTBOOT_MODE || reboot_reason == RECOVERY_MODE)
 		reset_type = PON_PSHOLD_WARM_RESET;
 	else
 		reset_type = PON_PSHOLD_HARD_RESET;

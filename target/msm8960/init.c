@@ -50,8 +50,9 @@
 #include <crypto_hash.h>
 #include <board.h>
 #include <target/board.h>
+#include <assert.h>
+#include <arch/defines.h>
 
-extern void dmb(void);
 extern void msm8960_keypad_init(void);
 extern void msm8930_keypad_init(void);
 extern void panel_backlight_on(void);
@@ -176,7 +177,7 @@ crypto_engine_type board_ce_type(void)
 	return platform_ce_type;
 }
 
-unsigned target_baseband()
+unsigned target_baseband(void)
 {
 	return board_baseband();
 }
@@ -482,24 +483,37 @@ void target_baseband_detect(struct board_data *board)
 	board->baseband = baseband;
 }
 
-/* Returns 1 if target supports continuous splash screen. */
-int target_cont_splash_screen()
-{
-	switch(board_platform_id())
-	{
-	case MSM8960:
-	case MSM8960AB:
-	case APQ8060AB:
-	case MSM8260AB:
-	case MSM8660AB:
-		return 1;
+static uint8_t splash_override;
 
-	default:
-		return 0;
+/* Returns 1 if target supports continuous splash screen. */
+int target_cont_splash_screen(void)
+{
+	uint8_t splash_screen = 0;
+	if(!splash_override) {
+		switch(board_platform_id())
+		{
+			case MSM8960:
+			case MSM8960AB:
+			case APQ8060AB:
+			case MSM8260AB:
+			case MSM8660AB:
+				dprintf(SPEW, "Target_cont_splash=1\n");
+				splash_screen = 1;
+				break;
+			default:
+				dprintf(SPEW, "Target_cont_splash=0\n");
+				splash_screen = 0;
+		}
 	}
+	return splash_screen;
 }
 
-void apq8064_ext_3p3V_enable()
+void target_force_cont_splash_disable(uint8_t override)
+{
+	splash_override = override;
+}
+
+void apq8064_ext_3p3V_enable(void)
 {
 	/* Configure GPIO for output */
 	gpio_tlmm_config(77, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_8MA, GPIO_ENABLE);
@@ -547,7 +561,7 @@ uint32_t target_volume_down()
 
 int target_power_key(void)
 {
-	int ret = 0;
+	uint8_t ret = 0;
 
 	pm8921_pwrkey_status(&ret);
 	return ret;

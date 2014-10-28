@@ -75,7 +75,9 @@ static int API_getc(va_list ap)
 	if ((c = (int *)va_arg(ap, uint32_t)) == NULL)
 		return API_EINVAL;
 
+#if WITH_DEBUG_UART
 	*c = uart_getc(0, 0);
+#endif
 	return 0;
 }
 
@@ -93,7 +95,10 @@ static int API_tstc(va_list ap)
 
 #if WITH_DEBUG_UART
 	*t = uart_tstc(0);
+#else
+	*t = 0;
 #endif
+
 	return 0;
 }
 
@@ -178,7 +183,7 @@ static int API_udelay(va_list ap)
 	if ((d = (unsigned long *)va_arg(ap, uint32_t)) == NULL)
 		return API_EINVAL;
 
-	udelay(*d);
+	spin(*d);
 	return 0;
 }
 
@@ -472,7 +477,7 @@ static int API_env_get(va_list ap)
 	if(strcmp("grub_bootdev", name)==0)
 		grub_get_bootdev(value);
 	else if(strcmp("grub_bootpath", name)==0)
-		*value = "/boot/grub";
+		grub_get_bootpath(value);
 	else {
 		dprintf(INFO, "%s: %s\n", __func__, name);
 		*value = NULL;
@@ -585,10 +590,7 @@ static int API_display_fb_get(va_list ap)
  */
 static int API_display_fb_flush(va_list ap)
 {
-#if TARGET_MSM8960_ARIES
-	trigger_mdp_dsi();
-	mdelay(10);
-#endif
+	fbcon_flush();
 	return 0;
 }
 
@@ -608,6 +610,9 @@ static int keymap[MAX_KEYS];
  */
 static int API_input_getkey(va_list ap)
 {
+	// small delay to prevent unwanted keypresses
+	spin(1000);
+
 	CHECK_AND_REPORT_KEY(KEY_UP, target_volume_up());
 	CHECK_AND_REPORT_KEY(KEY_DOWN, target_volume_down());
 	CHECK_AND_REPORT_KEY(KEY_RIGHT, target_power_key());
@@ -694,9 +699,13 @@ static int API_boot_create_tags(va_list ap)
 			return API_EINVAL;
 		}
 	}
-#else
-	generate_atags(info->tags_addr, (const char*)final_cmdline, info->ramdisk, info->ramdisk_size);
+	else
 #endif
+	{
+#if !DEVICE_TREE || DEVICE_TREE_FALLBACK
+		generate_atags(info->tags_addr, (const char*)final_cmdline, info->ramdisk, info->ramdisk_size);
+#endif
+	}
 
 	return 0;
 }

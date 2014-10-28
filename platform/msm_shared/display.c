@@ -28,36 +28,21 @@
 
 #include <debug.h>
 #include <err.h>
+#include <string.h>
+#include <dev/flash.h>
 #include <msm_panel.h>
 #include <mdp4.h>
 #include <mipi_dsi.h>
 #include <boot_stats.h>
-
-#ifndef DISPLAY_TYPE_HDMI
-static int hdmi_dtv_init(void)
-{
-        return 0;
-}
-
-static int hdmi_dtv_on(void)
-{
-        return 0;
-}
-
-static int hdmi_msm_turn_on(void)
-{
-        return 0;
-}
-#endif
+#include <target.h>
+#include <malloc.h>
 
 static struct msm_fb_panel_data *panel;
-
-extern int lvds_on(struct msm_fb_panel_data *pdata);
 
 static int msm_fb_alloc(struct fbcon_config *fb)
 {
 	if (fb == NULL)
-		return ERROR;
+		return ERR_INVALID_ARGS;
 
 	if (fb->base == NULL)
 		fb->base = memalign(4096, fb->width
@@ -65,12 +50,12 @@ static int msm_fb_alloc(struct fbcon_config *fb)
 							* (fb->bpp / 8));
 
 	if (fb->base == NULL)
-		return ERROR;
+		return ERR_INVALID_ARGS;
 
 	return NO_ERROR;
 }
 
-int msm_display_config()
+int msm_display_config(void)
 {
 	int ret = NO_ERROR;
 	int mdp_rev;
@@ -95,7 +80,8 @@ int msm_display_config()
 		dprintf(INFO, "Config MIPI_VIDEO_PANEL.\n");
 
 		mdp_rev = mdp_get_revision();
-		if (mdp_rev == MDP_REV_50 || mdp_rev == MDP_REV_304)
+		if (mdp_rev == MDP_REV_50 || mdp_rev == MDP_REV_304 ||
+						mdp_rev == MDP_REV_305)
 			ret = mdss_dsi_config(panel);
 		else
 			ret = mipi_config(panel);
@@ -113,7 +99,8 @@ int msm_display_config()
 	case MIPI_CMD_PANEL:
 		dprintf(INFO, "Config MIPI_CMD_PANEL.\n");
 		mdp_rev = mdp_get_revision();
-		if (mdp_rev == MDP_REV_50 || mdp_rev == MDP_REV_304)
+		if (mdp_rev == MDP_REV_50 || mdp_rev == MDP_REV_304 ||
+						mdp_rev == MDP_REV_305)
 			ret = mdss_dsi_config(panel);
 		else
 			ret = mipi_config(panel);
@@ -132,7 +119,7 @@ int msm_display_config()
 		break;
 	case HDMI_PANEL:
 		dprintf(INFO, "Config HDMI PANEL.\n");
-		ret = hdmi_dtv_init();
+		ret = mdss_hdmi_config(pinfo, &(panel->fb));
 		if (ret)
 			goto msm_display_config_out;
 		break;
@@ -153,7 +140,7 @@ msm_display_config_out:
 	return ret;
 }
 
-int msm_display_on()
+int msm_display_on(void)
 {
 	int ret = NO_ERROR;
 	int mdp_rev;
@@ -175,7 +162,7 @@ int msm_display_on()
 	switch (pinfo->type) {
 	case LVDS_PANEL:
 		dprintf(INFO, "Turn on LVDS PANEL.\n");
-		ret = mdp_lcdc_on(panel);
+		ret = mdp_lcdc_on();
 		if (ret)
 			goto msm_display_on_out;
 		ret = lvds_on(panel);
@@ -197,7 +184,8 @@ int msm_display_on()
 		if (ret)
 			goto msm_display_on_out;
 		mdp_rev = mdp_get_revision();
-		if (mdp_rev != MDP_REV_50 && mdp_rev != MDP_REV_304) {
+		if (mdp_rev != MDP_REV_50 && mdp_rev != MDP_REV_304 &&
+						mdp_rev != MDP_REV_305) {
 			ret = mipi_cmd_trigger();
 			if (ret)
 				goto msm_display_on_out;
@@ -205,17 +193,17 @@ int msm_display_on()
 		break;
 	case LCDC_PANEL:
 		dprintf(INFO, "Turn on LCDC PANEL.\n");
-		ret = mdp_lcdc_on(panel);
+		ret = mdp_lcdc_on();
 		if (ret)
 			goto msm_display_on_out;
 		break;
 	case HDMI_PANEL:
 		dprintf(INFO, "Turn on HDMI PANEL.\n");
-		ret = hdmi_dtv_on();
+		ret = mdss_hdmi_init();
 		if (ret)
 			goto msm_display_on_out;
 
-		ret = hdmi_msm_turn_on();
+		ret = mdss_hdmi_on(pinfo);
 		if (ret)
 			goto msm_display_on_out;
 		break;
@@ -248,7 +236,7 @@ int msm_display_init(struct msm_fb_panel_data *pdata)
 
 	/* Turn on panel */
 	if (pdata->power_func)
-		ret = pdata->power_func(1);
+		ret = pdata->power_func(1, &(panel->panel_info));
 
 	if (ret)
 		goto msm_display_init_out;
@@ -280,6 +268,10 @@ int msm_display_init(struct msm_fb_panel_data *pdata)
 	ret = msm_fb_alloc(&(panel->fb));
 	if (ret)
 		goto msm_display_init_out;
+
+#if TARGET_MSM8960_ARIES
+	panel->fb.update_start = trigger_mdp_dsi;
+#endif
 
 	fbcon_setup(&(panel->fb));
 	display_image_on_screen();
@@ -390,7 +382,7 @@ int msm_display_off()
 
 	/* Disable panel */
 	if (panel->power_func)
-		ret = panel->power_func(0);
+		ret = panel->power_func(0, pinfo);
 
 msm_display_off_out:
 	return ret;

@@ -51,11 +51,15 @@
 #include <platform/gpio.h>
 #include <platform/timer.h>
 #include <stdlib.h>
+#include <string.h>
 #include <ufs.h>
 #include <boot_device.h>
 #include <qmp_phy.h>
 #include <qusb2_phy.h>
 #include <rpm-smd.h>
+#include <sdhci_msm.h>
+#include <pm8x41_wled.h>
+#include <qpnp_wled.h>
 
 #define CE_INSTANCE             2
 #define CE_EE                   1
@@ -71,9 +75,10 @@
 
 #define FASTBOOT_MODE           0x77665500
 
-#define BOOT_DEVICE_MASK(val)   ((val & 0x3E) >>1)
+#define PMIC_WLED_SLAVE_ID      3
+#define DDR_CFG_DLY_VAL         0x80040870
 
-static void set_sdc_power_ctrl(void);
+static void set_sdc_power_ctrl(uint8_t slot);
 static uint32_t mmc_pwrctl_base[] =
 	{ MSM_SDC1_BASE, MSM_SDC2_BASE };
 
@@ -87,6 +92,7 @@ struct mmc_device *dev;
 struct ufs_dev ufs_device;
 
 extern void ulpi_write(unsigned val, unsigned reg);
+extern int platform_is_msm8994();
 
 void target_early_init(void)
 {
@@ -177,27 +183,72 @@ void target_usb_stop(void)
 {
 }
 
-static void set_sdc_power_ctrl()
+unsigned target_pause_for_battery_charge(void)
 {
+	uint8_t pon_reason = pm8x41_get_pon_reason();
+	uint8_t is_cold_boot = pm8x41_get_is_cold_boot();
+	dprintf(INFO, "%s : pon_reason is %d cold_boot:%d\n", __func__,
+		pon_reason, is_cold_boot);
+	/* In case of fastboot reboot,adb reboot or if we see the power key
+	* pressed we do not want go into charger mode.
+	* fastboot reboot is warm boot with PON hard reset bit not set
+	* adb reboot is a cold boot with PON hard reset bit set
+	*/
+	if (is_cold_boot &&
+			(!(pon_reason & HARD_RST)) &&
+			(!(pon_reason & KPDPWR_N)) &&
+			((pon_reason & USB_CHG) || (pon_reason & DC_CHG)))
+		return 1;
+	else
+		return 0;
+}
+
+static void set_sdc_power_ctrl(uint8_t slot)
+{
+	uint32_t reg = 0;
+	uint8_t clk;
+	uint8_t cmd;
+	uint8_t dat;
+
+	if (slot == 0x1)
+	{
+		clk = TLMM_CUR_VAL_16MA;
+		cmd = TLMM_CUR_VAL_8MA;
+		dat = TLMM_CUR_VAL_8MA;
+		reg = SDC1_HDRV_PULL_CTL;
+	}
+	else if (slot == 0x2)
+	{
+		clk = TLMM_CUR_VAL_16MA;
+		cmd = TLMM_CUR_VAL_10MA;
+		dat = TLMM_CUR_VAL_10MA;
+		reg = SDC2_HDRV_PULL_CTL;
+	}
+	else
+	{
+		dprintf(CRITICAL, "Unsupported SDC slot passed\n");
+		return;
+	}
+
 	/* Drive strength configs for sdc pins */
 	struct tlmm_cfgs sdc1_hdrv_cfg[] =
 	{
-		{ SDC1_CLK_HDRV_CTL_OFF,  TLMM_CUR_VAL_16MA, TLMM_HDRV_MASK },
-		{ SDC1_CMD_HDRV_CTL_OFF,  TLMM_CUR_VAL_10MA, TLMM_HDRV_MASK },
-		{ SDC1_DATA_HDRV_CTL_OFF, TLMM_CUR_VAL_10MA, TLMM_HDRV_MASK },
+		{ SDC1_CLK_HDRV_CTL_OFF,  clk, TLMM_HDRV_MASK, reg },
+		{ SDC1_CMD_HDRV_CTL_OFF,  cmd, TLMM_HDRV_MASK, reg },
+		{ SDC1_DATA_HDRV_CTL_OFF, dat, TLMM_HDRV_MASK, reg },
 	};
 
 	/* Pull configs for sdc pins */
 	struct tlmm_cfgs sdc1_pull_cfg[] =
 	{
-		{ SDC1_CLK_PULL_CTL_OFF,  TLMM_NO_PULL, TLMM_PULL_MASK },
-		{ SDC1_CMD_PULL_CTL_OFF,  TLMM_PULL_UP, TLMM_PULL_MASK },
-		{ SDC1_DATA_PULL_CTL_OFF, TLMM_PULL_UP, TLMM_PULL_MASK },
+		{ SDC1_CLK_PULL_CTL_OFF,  TLMM_NO_PULL, TLMM_PULL_MASK, reg },
+		{ SDC1_CMD_PULL_CTL_OFF,  TLMM_PULL_UP, TLMM_PULL_MASK, reg },
+		{ SDC1_DATA_PULL_CTL_OFF, TLMM_PULL_UP, TLMM_PULL_MASK, reg },
 	};
 
 	struct tlmm_cfgs sdc1_rclk_cfg[] =
 	{
-		{ SDC1_RCLK_PULL_CTL_OFF, TLMM_PULL_DOWN, TLMM_PULL_MASK },
+		{ SDC1_RCLK_PULL_CTL_OFF, TLMM_PULL_DOWN, TLMM_PULL_MASK, reg },
 	};
 
 	/* Set the drive strength & pull control values */
@@ -210,9 +261,6 @@ void target_sdc_init()
 {
 	struct mmc_config_data config = {0};
 
-	/* Set drive strength & pull ctrl values */
-	set_sdc_power_ctrl();
-
 	config.bus_width = DATA_BUS_WIDTH_8BIT;
 	config.max_clk_rate = MMC_CLK_192MHZ;
 
@@ -223,6 +271,9 @@ void target_sdc_init()
 	config.pwr_irq     = mmc_sdc_pwrctl_irq[config.slot - 1];
 	config.hs400_support = 1;
 
+	/* Set drive strength & pull ctrl values */
+	set_sdc_power_ctrl(config.slot);
+
 	if (!(dev = mmc_init(&config)))
 	{
 		/* Try slot 2 */
@@ -231,6 +282,9 @@ void target_sdc_init()
 		config.sdhc_base = mmc_sdhci_base[config.slot - 1];
 		config.pwrctl_base = mmc_pwrctl_base[config.slot - 1];
 		config.pwr_irq     = mmc_sdc_pwrctl_irq[config.slot - 1];
+
+		/* Set drive strength & pull ctrl values */
+		set_sdc_power_ctrl(config.slot);
 
 		if (!(dev = mmc_init(&config)))
 		{
@@ -280,6 +334,10 @@ void target_init(void)
 	}
 
 	rpm_smd_init();
+
+	/* QPNP WLED init for display backlight */
+	pm8x41_wled_config_slave_id(PMIC_WLED_SLAVE_ID);
+	qpnp_wled_init();
 }
 
 unsigned board_machtype(void)
@@ -293,6 +351,33 @@ void target_detect(struct board_data *board)
 	/* This is filled from board.c */
 }
 
+static uint8_t splash_override;
+/* Returns 1 if target supports continuous splash screen. */
+int target_cont_splash_screen()
+{
+	uint8_t splash_screen = 0;
+	if(!splash_override) {
+		switch(board_hardware_id())
+		{
+			case HW_PLATFORM_SURF:
+			case HW_PLATFORM_MTP:
+			case HW_PLATFORM_FLUID:
+				dprintf(SPEW, "Target_cont_splash=1\n");
+				splash_screen = 1;
+				break;
+			default:
+				dprintf(SPEW, "Target_cont_splash=0\n");
+				splash_screen = 0;
+		}
+	}
+	return splash_screen;
+}
+
+void target_force_cont_splash_disable(uint8_t override)
+{
+        splash_override = override;
+}
+
 /* Detect the modem type */
 void target_baseband_detect(struct board_data *board)
 {
@@ -302,9 +387,11 @@ void target_baseband_detect(struct board_data *board)
 
 	switch(platform) {
 	case MSM8994:
+	case MSM8992:
 		board->baseband = BASEBAND_MSM;
 		break;
 	case APQ8094:
+	case APQ8092:
 		board->baseband = BASEBAND_APQ;
 		break;
 	default:
@@ -331,7 +418,10 @@ unsigned check_reboot_mode(void)
 	uint32_t restart_reason = 0;
 	uint32_t restart_reason_addr;
 
-	restart_reason_addr = RESTART_REASON_ADDR;
+	if (platform_is_msm8994())
+		restart_reason_addr = RESTART_REASON_ADDR;
+	else
+		restart_reason_addr = RESTART_REASON_ADDR2;
 
 	/* Read reboot reason and scrub it */
 	restart_reason = readl(restart_reason_addr);
@@ -469,4 +559,9 @@ void target_fastboot_init(void)
 {
 	/* We are entering fastboot mode, so read partition table */
 	mmc_read_partition_table(1);
+}
+
+uint32_t target_ddr_cfg_val()
+{
+	return DDR_CFG_DLY_VAL;
 }

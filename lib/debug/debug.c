@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Travis Geiselbrecht
+ * Copyright (c) 2008-2014 Travis Geiselbrecht
  *
  * Copyright (c) 2014, The Linux Foundation. All rights reserved.
  *
@@ -27,6 +27,7 @@
 #include <debug.h>
 #include <stdlib.h>
 #include <printf.h>
+#include <stdio.h>
 #include <list.h>
 #include <string.h>
 #include <arch/ops.h>
@@ -44,16 +45,17 @@ __stack_chk_fail (void)
 
 void spin(uint32_t usecs)
 {
-	bigtime_t start = current_time_hires();
+	lk_bigtime_t start = current_time_hires();
 
 	while ((current_time_hires() - start) < usecs)
-		;	
+		;
 }
 
 void halt(void)
 {
 	enter_critical_section(); // disable ints
 	platform_halt();
+	for(;;);
 }
 
 void _panic(void *caller, const char *fmt, ...)
@@ -68,42 +70,93 @@ void _panic(void *caller, const char *fmt, ...)
 	halt();
 }
 
+static int __debug_stdio_fputc(void *ctx, int c)
+{
+	_dputc(c);
+	return 0;
+}
+
+static int __debug_stdio_fputs(void *ctx, const char *s)
+{
+	return _dputs(s);
+}
+
+static int __debug_stdio_fgetc(void *ctx)
+{
+	char c;
+	int err;
+
+	err = platform_dgetc(&c, true);
+	if (err < 0)
+		return err;
+	return (unsigned char)c;
+}
+
+static int __debug_stdio_vfprintf(void *ctx, const char *fmt, va_list ap)
+{
+	return _dvprintf(fmt, ap);
+}
+
+#define DEFINE_STDIO_DESC(id)						\
+	[(id)]	= {							\
+		.ctx		= &__stdio_FILEs[(id)],			\
+		.fputc		= __debug_stdio_fputc,			\
+		.fputs		= __debug_stdio_fputs,			\
+		.fgetc		= __debug_stdio_fgetc,			\
+		.vfprintf	= __debug_stdio_vfprintf,		\
+	}
+
+FILE __stdio_FILEs[3] = {
+	DEFINE_STDIO_DESC(0), /* stdin */
+	DEFINE_STDIO_DESC(1), /* stdout */
+	DEFINE_STDIO_DESC(2), /* stderr */
+};
+#undef DEFINE_STDIO_DESC
+
+#if !DISABLE_DEBUG_OUTPUT
+
 int _dputs(const char *str)
 {
-	while(*str != 0) {
+	while (*str != 0) {
 		_dputc(*str++);
 	}
 
 	return 0;
 }
 
+static int _dprintf_output_func(const char *str, size_t len, void *state)
+{
+	size_t count = 0;
+	while (count < len && *str) {
+		_dputc(*str);
+		str++;
+		count++;
+	}
+
+	return count;
+}
+
 int _dprintf(const char *fmt, ...)
 {
-	char buf[256];
 	char ts_buf[13];
 	int err;
 
-	snprintf(ts_buf, sizeof(ts_buf), "[%u] ", current_time());
+	snprintf(ts_buf, sizeof(ts_buf), "[%lu] ", current_time());
 	dputs(ALWAYS, ts_buf);
 
 	va_list ap;
 	va_start(ap, fmt);
-	err = vsnprintf(buf, sizeof(buf), fmt, ap);
+	err = _printf_engine(&_dprintf_output_func, NULL, fmt, ap);
 	va_end(ap);
-
-	dputs(ALWAYS, buf);
 
 	return err;
 }
 
 int _dvprintf(const char *fmt, va_list ap)
 {
-	char buf[256];
 	int err;
 
-	err = vsnprintf(buf, sizeof(buf), fmt, ap);
-
-	dputs(ALWAYS, buf);
+	err = _printf_engine(&_dprintf_output_func, NULL, fmt, ap);
 
 	return err;
 }
@@ -119,7 +172,7 @@ void hexdump(const void *ptr, size_t len)
 		printf("%08x %08x %08x %08x |", *(const uint32_t *)address, *(const uint32_t *)(address + 4), *(const uint32_t *)(address + 8), *(const uint32_t *)(address + 12));
 		for (i=0; i < 16; i++) {
 			char c = *(const char *)(address + i);
-			if (isalpha(c)) {
+			if (isprint(c)) {
 				printf("%c", c);
 			} else {
 				printf(".");
@@ -127,243 +180,24 @@ void hexdump(const void *ptr, size_t len)
 		}
 		printf("|\n");
 		address += 16;
-	}	
+	}
 }
 
 void hexdump8(const void *ptr, size_t len)
 {
 	addr_t address = (addr_t)ptr;
 	size_t count;
-	int i;
+	size_t i;
 
 	for (count = 0 ; count < len; count += 16) {
 		printf("0x%08lx: ", address);
-		for (i=0; i < 16; i++) {
+		for (i=0; i < MIN(len - count, 16); i++) {
 			printf("0x%02hhx ", *(const uint8_t *)(address + i));
 		}
 		printf("\n");
 		address += 16;
-	}	
+	}
 }
 
-#ifdef WITH_LIB_CONSOLE
-#include <lib/console.h>
+#endif // !DISABLE_DEBUG_OUTPUT
 
-static int cmd_display_mem(int argc, const cmd_args *argv);
-static int cmd_modify_mem(int argc, const cmd_args *argv);
-static int cmd_fill_mem(int argc, const cmd_args *argv);
-static int cmd_reset(int argc, const cmd_args *argv);
-static int cmd_memtest(int argc, const cmd_args *argv);
-static int cmd_copy_mem(int argc, const cmd_args *argv);
-
-STATIC_COMMAND_START
-#if DEBUGLEVEL > 0
-	{ "dw", "display memory in words", &cmd_display_mem },
-	{ "dh", "display memory in halfwords", &cmd_display_mem },
-	{ "db", "display memory in bytes", &cmd_display_mem },
-	{ "mw", "modify word of memory", &cmd_modify_mem },
-	{ "mh", "modify halfword of memory", &cmd_modify_mem },
-	{ "mb", "modify byte of memory", &cmd_modify_mem },
-	{ "fw", "fill range of memory by word", &cmd_fill_mem },
-	{ "fh", "fill range of memory by halfword", &cmd_fill_mem },
-	{ "fb", "fill range of memory by byte", &cmd_fill_mem },
-	{ "mc", "copy a range of memory", &cmd_copy_mem },
-#endif
-#if DEBUGLEVEL > 1
-	{ "mtest", "simple memory test", &cmd_memtest },
-#endif
-STATIC_COMMAND_END(mem);
-
-static int cmd_display_mem(int argc, const cmd_args *argv)
-{
-	int size;
-
-	if (argc < 3) {
-		printf("not enough arguments\n");
-		printf("%s <address> <length>\n", argv[0].str);
-		return -1;
-	}
-
-	if (strcmp(argv[0].str, "dw") == 0) {
-		size = 4;
-	} else if (strcmp(argv[0].str, "dh") == 0) {
-		size = 2;
-	} else {
-		size = 1;
-	}
-
-	unsigned long address = argv[1].u;
-	size_t len = argv[2].u;
-	unsigned long stop = address + len;
-	int count = 0;
-
-	if ((address & (size - 1)) != 0) {
-		printf("unaligned address, cannot display\n");
-		return -1;
-	}
-
-	for ( ; address < stop; address += size) {
-		if (count == 0)
-			printf("0x%08lx: ", address);
-		switch (size) {
-			case 4:
-				printf("%08x ", *(uint32_t *)address);
-				break;
-			case 2:
-				printf("%04hx ", *(uint16_t *)address);
-				break;
-			case 1:
-				printf("%02hhx ", *(uint8_t *)address);
-				break;
-		}
-		count += size;
-		if (count == 16) {
-			printf("\n");
-			count = 0;
-		}
-	}	
-
-	if (count != 0)
-		printf("\n");
-
-	return 0;
-}
-
-static int cmd_modify_mem(int argc, const cmd_args *argv)
-{
-	int size;
-
-	if (argc < 3) {
-		printf("not enough arguments\n");
-		printf("%s <address> <val>\n", argv[0].str);
-		return -1;
-	}
-
-	if (strcmp(argv[0].str, "mw") == 0) {
-		size = 4;
-	} else if (strcmp(argv[0].str, "mh") == 0) {
-		size = 2;
-	} else {
-		size = 1;
-	}
-
-	unsigned long address = argv[1].u;
-	unsigned int val = argv[2].u;
-
-	if ((address & (size - 1)) != 0) {
-		printf("unaligned address, cannot modify\n");
-		return -1;
-	}
-
-	switch (size) {
-		case 4:
-			*(uint32_t *)address = (uint32_t)val;
-			break;
-		case 2:
-			*(uint16_t *)address = (uint16_t)val;
-			break;
-		case 1:
-			*(uint8_t *)address = (uint8_t)val;
-			break;
-	}
-
-	return 0;
-}
-
-static int cmd_fill_mem(int argc, const cmd_args *argv)
-{
-	int size;
-
-	if (argc < 4) {
-		printf("not enough arguments\n");
-		printf("%s <address> <len> <val>\n", argv[0].str);
-		return -1;
-	}
-
-	if (strcmp(argv[0].str, "fw") == 0) {
-		size = 4;
-	} else if (strcmp(argv[0].str, "fh") == 0) {
-		size = 2;
-	} else {
-		size = 1;
-	}
-
-	unsigned long address = argv[1].u;
-	unsigned long len = argv[2].u;
-	unsigned long stop = address + len;
-	unsigned int val = argv[3].u;
-
-	if ((address & (size - 1)) != 0) {
-		printf("unaligned address, cannot modify\n");
-		return -1;
-	}
-
-	for ( ; address < stop; address += size) {
-		switch (size) {
-		case 4:
-			*(uint32_t *)address = (uint32_t)val;
-			break;
-		case 2:
-			*(uint16_t *)address = (uint16_t)val;
-			break;
-		case 1:
-			*(uint8_t *)address = (uint8_t)val;
-			break;
-		}
-	}
-
-	return 0;
-}
-
-static int cmd_copy_mem(int argc, const cmd_args *argv)
-{
-	if (argc < 4) {
-		printf("not enough arguments\n");
-		printf("%s <source address> <target address> <len>\n", argv[0].str);
-		return -1;
-	}
-	
-	addr_t source = argv[1].u;
-	addr_t target = argv[2].u;
-	size_t len = argv[3].u;
-
-	memcpy((void *)target, (const void *)source, len);
-
-	return 0;
-}
-
-static int cmd_memtest(int argc, const cmd_args *argv)
-{
-	if (argc < 3) {
-		printf("not enough arguments\n");
-		printf("%s <base> <len>\n", argv[0].str);
-		return -1;
-	}
-
-	uint32_t *ptr;
-	size_t len;
-
-	ptr = (uint32_t *)argv[1].u;
-	len = (size_t)argv[2].u;
-
-	size_t i;
-	// write out
-	printf("writing first pass...");
-	for (i = 0; i < len / 4; i++) {
-		ptr[i] = i;
-	}
-	printf("done\n");
-
-	// verify
-	printf("verifying...");
-	for (i = 0; i < len / 4; i++) {
-		if (ptr[i] != i)
-			printf("error at %p\n", &ptr[i]);
-	}
-	printf("done\n");
-
-	return 0;
-}
-
-#endif
- 

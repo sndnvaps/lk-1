@@ -27,26 +27,15 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <compiler.h>
-#include <scm.h>
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
-
-void debug_dump_regs(void);
-
-void debug_dump_memory_bytes(void *mem, int len);
-void debug_dump_memory_halfwords(void *mem, int len);
-void debug_dump_memory_words(void *mem, int len);
-
-void debug_set_trace_level(int trace_type, int level);
+__BEGIN_CDECLS
 
 void platform_halt(void);
 
-#if defined(__cplusplus)
-}
-#endif
+void platform_dputc(char c);
+int platform_dgetc(char *c, bool wait);
 
+__END_CDECLS
 
 #endif
 

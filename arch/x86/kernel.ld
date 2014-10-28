@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2009 Corey Tabaka
+ * Copyright (c) 2013 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -25,59 +26,47 @@ ENTRY(_start)
 SECTIONS
 {
 	.text 0x0200000 : {
-		*(.text)
-		*(SORT(.text$*))
+		KEEP(*(.text.boot))
+		*(.text* .sram.text)
 		*(.gnu.linkonce.t.*)
-		
-		__ctor_list = .;
-		*(SORT(.ctor*))
-		__ctor_end = .;
-		__dtor_list = .;
-		*(SORT(.dtor*))
-		__dtor_end = .;
-		
-		. = ALIGN(4096);
-	}
-	
-	__data_start = .;
-	.data		: { *(.data .data.* .gnu.linkonce.d.*) }
-	.stab		: { *(.stab) }
-	.stabst		: { *(.stabstr) }
-	
-	. = ALIGN(4096);
-	__data_end = .;
-	
-	.rdata		: {
-		*(.rdata)
-		*(SORT(.rdata$*))
+	} =0x9090
+
+	.rodata : ALIGN(4) {
+		__rodata_start = .;
 		*(.rodata*)
 		*(.gnu.linkonce.r.*)
-		__commands_start = .;
-		KEEP (*(.commands))
-		__commands_end = .;
+INCLUDE "arch/shared_rodata_sections.ld"
 		. = ALIGN(4);
-		__apps_start = .;
-		KEEP (*(.apps))
-		__apps_end = .;
-		
-		. = ALIGN(4096);
+		__rodata_end = .;
 	}
-	
-	__bss_start = .;
-	.bss		: {
+
+	.data : ALIGN(4096) {
+		__data_start = .;
+		*(.data .data.* .gnu.linkonce.d.*)
+INCLUDE "arch/shared_data_sections.ld"
+	}
+	__ctor_list = .;
+	.ctors : { KEEP(*(.ctors)) }
+	__ctor_end = .;
+	__dtor_list = .;
+	.dtors : { KEEP(*(.dtors)) }
+	__dtor_end = .;
+
+	.stab   : { *(.stab) }
+	.stabst : { *(.stabstr) }
+
+	__data_end = .;
+
+	.bss : ALIGN(4) {
+		__bss_start = .;
 		*(.bss*)
 		*(.gnu.linkonce.b.*)
 		*(COMMON)
-		
-		. = ALIGN(4096);
+		. = ALIGN(4);
+		__bss_end = .;
 	}
-	__bss_end = .;
-	
-	/*. += 0x2000;
-	_kstack = .;
-	. += 0x1000;*/
-	
+
 	_end = .;
-	
+
 	/DISCARD/ : { *(.comment .note .eh_frame) }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Travis Geiselbrecht
+ * Copyright (c) 2008-2014 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -23,14 +23,27 @@
 #ifndef __LIB_HEAP_H
 #define __LIB_HEAP_H
 
+#include <stddef.h>
 #include <sys/types.h>
+
+struct heap_stats {
+	void* heap_start;
+	size_t heap_len;
+	size_t heap_free;
+	size_t heap_max_chunk;
+	size_t heap_low_watermark;
+};
 
 void *heap_alloc(size_t, unsigned int alignment);
 void *heap_realloc(void *ptr, size_t size);
 void heap_free(void *);
 
 void heap_init(void);
+void heap_add_block(void *, size_t);
 
+void heap_get_stats(struct heap_stats *ptr);
 
+/* critical section time delayed free */
+void heap_delayed_free(void *);
 
 #endif

@@ -66,6 +66,7 @@ void platform_early_init(void)
 	platform_clock_init();
 	qgic_init();
 	qtimer_init();
+	scm_init();
 }
 
 void platform_init(void)
@@ -165,7 +166,19 @@ uint32_t platform_get_sclk_count(void)
 	return readl(MPM2_MPM_SLEEP_TIMETICK_COUNT_VAL);
 }
 
+int platform_is_msm8994()
+{
+	uint32_t platform = board_platform_id();
+	if ((platform == APQ8094) || (platform == MSM8994))
+		return 1;
+	else
+		return 0;
+}
+
 addr_t get_bs_info_addr()
 {
-	return ((addr_t)BS_INFO_ADDR);
+	if (platform_is_msm8994())
+		return ((addr_t)BS_INFO_ADDR);
+	else
+		return ((addr_t)BS_INFO_ADDR2);
 }

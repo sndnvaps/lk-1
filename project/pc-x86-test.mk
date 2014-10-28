@@ -2,6 +2,7 @@
 #
 LOCAL_DIR := $(GET_LOCAL_DIR)
 
+ARCH := x86
 TARGET := pc-x86
 MODULES += \
 	app/tests \

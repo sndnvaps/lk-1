@@ -7,8 +7,12 @@ SECTIONS
 	. = %MEMBASE%;
 
 	/* text/read-only data */
-	.text.boot : { *(.text.boot) }
-	.text :	{ *(.text .text.* .glue_7* .gnu.linkonce.t.*) } =0x9090
+	.text : {
+		KEEP(*(.text.boot.vectab1))
+		KEEP(*(.text.boot.vectab2))
+		KEEP(*(.text.boot))
+		*(.text* .sram.text.glue_7* .gnu.linkonce.t.*)
+	}
 
 	.interp : { *(.interp) }
 	.hash : { *(.hash) }
@@ -37,42 +41,56 @@ SECTIONS
 	.init : { *(.init) } =0x9090
 	.plt : { *(.plt) }
 
-	.rodata : { 
+	/* .ARM.exidx is sorted, so has to go in its own output section.  */
+	__exidx_start = .;
+	.ARM.exidx : { *(.ARM.exidx* .gnu.linkonce.armexidx.*) }
+	__exidx_end = .;
+
+	.rodata : ALIGN(4) {
+		__rodata_start = .;
 		*(.rodata .rodata.* .gnu.linkonce.r.*)
+INCLUDE "arch/shared_rodata_sections.ld"
 		. = ALIGN(4);
-		__commands_start = .;
-		KEEP (*(.commands))
-		__commands_end = .;
-		. = ALIGN(4);
-		__apps_start = .;
-		KEEP (*(.apps))
-		__apps_end = .;
-		. = ALIGN(4); 
-		__rodata_end = . ;		
+		__rodata_end = .;
 	}
 
-	/* writable data  */
-	__data_start_rom = .;	/* in one segment binaries, the rom data address is on top of the ram data address */
-	__data_start = .;
-	.data : SUBALIGN(4) { *(.data .data.* .gnu.linkonce.d.*) }
 
-	__ctor_list = .;
-	.ctors : { *(.ctors) }
-	__ctor_end = .;
-	__dtor_list = .;
-	.dtors : { *(.dtors) }
-	__dtor_end = .;
+	.data : ALIGN(4) {
+		/* writable data  */
+		__data_start_rom = .;
+		/* in one segment binaries, the rom data address is on top of the ram data address */
+		__data_start = .;
+		*(.data .data.* .gnu.linkonce.d.*)
+INCLUDE "arch/shared_data_sections.ld"
+	}
+
+	.ctors : ALIGN(4) {
+		__ctor_list = .;
+		KEEP(*(.ctors .init_array))
+		__ctor_end = .;
+	}
+	.dtors : ALIGN(4) {
+		__dtor_list = .;
+		KEEP(*(.dtors .fini_array))
+		__dtor_end = .;
+	}
 	.got : { *(.got.plt) *(.got) }
 	.dynamic : { *(.dynamic) }
 
 	__data_end = .;
 
 	/* unintialized data (in same segment as writable data) */
-	. = ALIGN(4);
-	__bss_start = .;
-	.bss : { *(.bss .bss.*) }
+	.bss : ALIGN(4) {
+		KEEP(*(.bss.prebss.*))
+		. = ALIGN(4);
+		__bss_start = .;
+		*(.bss .bss.*)
+		*(.gnu.linkonce.b.*)
+		*(COMMON)
+		. = ALIGN(4);
+		__bss_end = .;
+	}
 
-	. = ALIGN(4); 
 	_end = .;
 
 	. = %MEMBASE% + %MEMSIZE%;

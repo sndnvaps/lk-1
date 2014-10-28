@@ -38,12 +38,12 @@
 
 static platform_timer_callback timer_callback;
 static void *timer_arg;
-static time_t timer_interval;
+static lk_time_t timer_interval;
 /* time in ms from start of LK. */
 static volatile uint32_t current_time;
 static uint32_t tick_count;
 
-static void qtimer_enable();
+static void qtimer_enable(void);
 
 static enum handler_return qtimer_irq(void *arg)
 {
@@ -62,7 +62,7 @@ static enum handler_return qtimer_irq(void *arg)
 /* Programs the Physical Secure Down counter timer.
  * interval : Counter ticks till expiry interrupt is fired.
  */
-void qtimer_set_physical_timer(time_t msecs_interval,
+void qtimer_set_physical_timer(lk_time_t msecs_interval,
 							   platform_timer_callback tmr_callback,
 							   void *tmr_arg)
 {
@@ -87,7 +87,7 @@ void qtimer_set_physical_timer(time_t msecs_interval,
 
 
 /* Function to return the frequency of the timer */
-uint32_t qtimer_get_frequency()
+uint32_t qtimer_get_frequency(void)
 {
 	uint32_t freq;
 
@@ -99,7 +99,7 @@ uint32_t qtimer_get_frequency()
 	return freq;
 }
 
-static void qtimer_enable()
+static void qtimer_enable(void)
 {
 	uint32_t ctrl;
 
@@ -113,7 +113,7 @@ static void qtimer_enable()
 	dsb();
 }
 
-void qtimer_disable()
+void qtimer_disable(void)
 {
 	uint32_t ctrl;
 
@@ -142,7 +142,7 @@ inline __ALWAYS_INLINE uint64_t qtimer_get_phy_timer_cnt()
 	return ((uint64_t)phy_cnt_hi_1 << 32) | phy_cnt_lo;
 }
 
-uint32_t qtimer_current_time()
+uint32_t qtimer_current_time(void)
 {
 	return current_time;
 }

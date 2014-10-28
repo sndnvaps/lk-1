@@ -456,6 +456,7 @@ void dwc_event_device_reset(dwc_dev_t *dev)
 	for (uint8_t ep_index = 2; ep_index < DWC_MAX_NUM_OF_EP; ep_index++)
 	{
 		dwc_ep_t *ep = &dev->ep[ep_index];
+		ASSERT(ep != NULL);
 
 		DBG("\n RESET on EP = %d while state = %s", ep_index,
 													ep_state_lookup[ep->state]);
@@ -489,7 +490,7 @@ void dwc_event_handler_ep_ctrl(dwc_dev_t *dev, uint32_t *event)
 	uint8_t                 event_status = DWC_EVENT_EP_EVENT_STATUS(*event);
 	uint16_t                event_param  = DWC_EVENT_EP_EVENT_PARAM(*event);
 
-	ASSERT(ep_phy_num < DWC_MAX_NUM_OF_EP);
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
 	ASSERT(ep != NULL);
 
@@ -573,7 +574,11 @@ uint8_t dwc_event_check_trb_status(dwc_dev_t *dev,
 	uint8_t status        = 0;
 	uint8_t trb_updated   = 0;
 	uint8_t event_status  = DWC_EVENT_EP_EVENT_STATUS(*event);
+
+	ASSERT(index < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep          = &dev->ep[index];
+	ASSERT(ep != NULL);
+
 	dwc_trb_t *trb        = ep->trb;
 	uint32_t num_of_trb   = ep->trb_queued;
 	uint32_t bytes_remaining = 0;
@@ -641,7 +646,7 @@ static void dwc_event_handler_ep_ctrl_state_setup(dwc_dev_t *dev,
 	dwc_event_ep_event_id_t event_id   = DWC_EVENT_EP_EVENT_ID(*event);
 	uint8_t event_status               = DWC_EVENT_EP_EVENT_STATUS(*event);
 
-	ASSERT(ep_phy_num < DWC_MAX_NUM_OF_EP);
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
 	ASSERT(ep != NULL);
 
@@ -756,7 +761,7 @@ static void dwc_event_handler_ep_ctrl_state_data(dwc_dev_t *dev,
 	uint8_t event_ctrl_stage           = DWC_EVENT_EP_EVENT_CTRL_STAGE(*event);
 	uint8_t event_status               = DWC_EVENT_EP_EVENT_STATUS(*event);
 
-	ASSERT(ep_phy_num < DWC_MAX_NUM_OF_EP);
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
 	ASSERT(ep != NULL);
 
@@ -931,6 +936,10 @@ static void dwc_event_handler_ep_ctrl_state_wait_for_host_3(dwc_dev_t *dev,
 	dwc_event_ep_event_id_t event_id   = DWC_EVENT_EP_EVENT_ID(*event);
 	uint8_t event_ctrl_stage           = DWC_EVENT_EP_EVENT_CTRL_STAGE(*event);
 
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
+	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
+	ASSERT(ep != NULL);
+
 	switch (event_id)
 	{
 	case DWC_EVENT_EP_CMD_COMPLETE:
@@ -943,15 +952,32 @@ static void dwc_event_handler_ep_ctrl_state_wait_for_host_3(dwc_dev_t *dev,
 		{
 			if (event_ctrl_stage == CONTROL_DATA_REQUEST)/* data request */
 			{
-				/* TODO:
-				 * special case handling when data stage transfer length
-				 * was exact multiple of max_pkt_size.
-				 * Need to setup a TRB to complete data stage with a zero
-				 * length pkt transfer.
-				 * Not implemented currently since all data during enumeration
-				 * is less then max_pkt_size.
-				 */
-				ASSERT(0);
+				if (ep->state == EP_STATE_START_TRANSFER ||
+								ep->state == EP_STATE_XFER_IN_PROG) {
+					/*
+					 * special case handling when data stage transfer length
+					 * was exact multiple of max_pkt_size.
+					 * Need to setup a TRB to complete data stage with a zero
+					 * length pkt transfer.
+					 */
+
+					dwc_request_t req;
+
+					req.callback = 0x0;
+					req.context  = 0x0;
+					req.data     = 0x0;
+					req.len      = 0x0;
+					req.trbctl   = TRBCTL_CONTROL_DATA;
+
+					DBG("\n Sending the elp to host as the end of xfer\n");
+					dwc_request_queue(dev, ep_phy_num, &req);
+					dev->ctrl_state = EP_FSM_CTRL_DATA;
+				} else {
+					DBG("\n attempting to start data when setup did not indicate"
+						"data stage. stall...\n\n");
+					dwc_ep_cmd_stall(dev, ep_phy_num);
+					dev->ctrl_state  = EP_FSM_STALL;
+				}
 			}
 			else if (event_ctrl_stage ==  CONTROL_STATUS_REQUEST)/* stat req */
 			{
@@ -992,7 +1018,7 @@ static void dwc_event_handler_ep_ctrl_state_status_2(dwc_dev_t *dev,
 	dwc_event_ep_event_id_t event_id   = DWC_EVENT_EP_EVENT_ID(*event);
 	uint8_t event_status               = DWC_EVENT_EP_EVENT_STATUS(*event);
 
-	ASSERT(ep_phy_num < DWC_MAX_NUM_OF_EP);
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
 	ASSERT(ep != NULL);
 
@@ -1066,7 +1092,7 @@ static void dwc_event_handler_ep_ctrl_state_status_3(dwc_dev_t *dev,
 	dwc_event_ep_event_id_t event_id   = DWC_EVENT_EP_EVENT_ID(*event);
 	uint8_t event_status               = DWC_EVENT_EP_EVENT_STATUS(*event);
 
-	ASSERT(ep_phy_num < DWC_MAX_NUM_OF_EP);
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
 	ASSERT(ep != NULL);
 
@@ -1145,7 +1171,7 @@ static void dwc_event_handler_ep_ctrl_state_stall(dwc_dev_t *dev,
 	uint8_t ep_phy_num                 = DWC_EVENT_EP_EVENT_EP_NUM(*event);
 	dwc_event_ep_event_id_t event_id   = DWC_EVENT_EP_EVENT_ID(*event);
 
-	ASSERT(ep_phy_num < DWC_MAX_NUM_OF_EP);
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
 	ASSERT(ep != NULL);
 
@@ -1220,7 +1246,7 @@ static void dwc_event_handler_ep_bulk_state_start_transfer(dwc_dev_t *dev,
 	dwc_event_ep_event_id_t event_id   = DWC_EVENT_EP_EVENT_ID(*event);
 	uint8_t event_status               = DWC_EVENT_EP_EVENT_STATUS(*event);
 
-	ASSERT(ep_phy_num < DWC_MAX_NUM_OF_EP);
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
 	ASSERT(ep != NULL);
 
@@ -1270,7 +1296,7 @@ static void dwc_event_handler_ep_bulk_state_xfer_in_prog(dwc_dev_t *dev,
 	uint8_t ep_phy_num                 = DWC_EVENT_EP_EVENT_EP_NUM(*event);
 	dwc_event_ep_event_id_t event_id   = DWC_EVENT_EP_EVENT_ID(*event);
 
-	ASSERT(ep_phy_num < DWC_MAX_NUM_OF_EP);
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
 	ASSERT(ep != NULL);
 
@@ -1354,7 +1380,7 @@ void dwc_event_handler_ep_bulk(dwc_dev_t *dev, uint32_t *event)
 	uint16_t                event_param  = DWC_EVENT_EP_EVENT_PARAM(*event);
 #endif
 
-	ASSERT(ep_phy_num < DWC_MAX_NUM_OF_EP);
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
 	ASSERT(ep != NULL);
 
@@ -1414,6 +1440,7 @@ void dwc_event_handler_ep_bulk(dwc_dev_t *dev, uint32_t *event)
  */
 static void dwc_ep_config_init_enable(dwc_dev_t *dev, uint8_t index)
 {
+	ASSERT(index < DWC_MAX_NUM_OF_EP);
 	uint8_t ep_phy_num = dev->ep[index].phy_num;
 
 	dwc_ep_cmd_set_config(dev, index, SET_CONFIG_ACTION_INIT);
@@ -1436,6 +1463,7 @@ static void dwc_ep_ctrl_init(dwc_dev_t *dev)
 
 	/* Control OUT */
 	index = DWC_EP_INDEX(0, DWC_EP_DIRECTION_OUT);
+	ASSERT(index < DWC_MAX_NUM_OF_EP);
 
 	dev->ep[index].number            = 0;
 	dev->ep[index].dir               = DWC_EP_DIRECTION_OUT;
@@ -1506,7 +1534,9 @@ static void dwc_ep_ctrl_state_setup_enter(dwc_dev_t *dev)
 /* entry function into inactive state for data transfer fsm */
 static void dwc_ep_bulk_state_inactive_enter(dwc_dev_t *dev, uint8_t ep_phy_num)
 {
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
+	ASSERT(ep != NULL);
 
 	/* queue request to receive the first setup pkt from host */
 	ep->req.data     = NULL;
@@ -1586,7 +1616,9 @@ void dwc_device_add_ep(dwc_dev_t *dev, dwc_ep_t *new_ep)
 {
 	uint8_t index = DWC_EP_INDEX(new_ep->number, new_ep->dir);
 
+	ASSERT(index < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[index];
+	ASSERT(ep != NULL);
 
 	memset(ep, 0, sizeof(ep));
 
@@ -1672,7 +1704,9 @@ static int dwc_request_queue(dwc_dev_t     *dev,
 							 uint8_t        ep_phy_num,
 							 dwc_request_t *req)
 {
+	ASSERT(DWC_EP_PHY_TO_INDEX(ep_phy_num) < DWC_MAX_NUM_OF_EP);
 	dwc_ep_t *ep = &dev->ep[DWC_EP_PHY_TO_INDEX(ep_phy_num)];
+	ASSERT(ep != NULL);
 
 	dwc_trb_t *trb          = ep->trb;
 	uint8_t *data_ptr       = req->data;

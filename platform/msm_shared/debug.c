@@ -30,6 +30,7 @@
  * SUCH DAMAGE.
  */
 
+#include <string.h>
 #include <stdlib.h>
 #include <debug.h>
 #include <printf.h>
@@ -37,10 +38,17 @@
 #include <dev/fbcon.h>
 #include <dev/uart.h>
 #include <platform/timer.h>
+#include <kernel/thread.h>
 #include <platform.h>
+#include <platform/msm_shared.h>
+#include <platform/msm_shared/timer.h>
 
 #if PON_VIB_SUPPORT
 #include <vibrator.h>
+#endif
+
+#if WITH_APP_MENU
+#include <app/menu.h>
 #endif
 
 static void write_dcc(char c)
@@ -102,7 +110,7 @@ unsigned lk_log_getsize(void) {
 }
 #endif /* WITH_DEBUG_LOG_BUF */
 
-void _dputc(char c)
+void platform_dputc(char c)
 {
 #if WITH_DEBUG_LOG_BUF
 	log_putc(c);
@@ -122,9 +130,12 @@ void _dputc(char c)
 #if WITH_DEBUG_JTAG
 	jtag_dputc(c);
 #endif
+#if WITH_APP_MENU
+	menu_putc(c);
+#endif
 }
 
-int dgetc(char *c, bool wait)
+int platform_dgetc(char *c, bool wait)
 {
 	int n;
 #if WITH_DEBUG_DCC

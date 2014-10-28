@@ -30,18 +30,23 @@
 #include <debug.h>
 #include <smem.h>
 #include <err.h>
+#include <string.h>
 #include <msm_panel.h>
 #include <mipi_dsi.h>
+#include <platform/timer.h>
 #include <pm8x41.h>
 #include <pm8x41_wled.h>
 #include <board.h>
 #include <platform/gpio.h>
 #include <platform/iomap.h>
+#include <platform/clock.h>
 #include <pm_pwm.h>
 #include <target/display.h>
+#include <target.h>
+#include <gcdb_display.h>
 
-#include "include/panel.h"
-#include "include/display_resource.h"
+#include <panel.h>
+#include <display_resource.h>
 
 #define MODE_GPIO_STATE_ENABLE 1
 
@@ -135,7 +140,7 @@ int target_panel_reset(uint8_t enable, struct panel_reset_sequence *resetseq,
 	return 0;
 }
 
-int target_ldo_ctrl(uint8_t enable)
+int target_ldo_ctrl(uint8_t enable, struct msm_panel_info *pinfo)
 {
 	uint32_t ldocounter = 0;
 	uint32_t pm8x41_ldo_base = 0x13F00;
@@ -145,8 +150,8 @@ int target_ldo_ctrl(uint8_t enable)
 			0x100 * ldo_entry_array[ldocounter].ldo_id),
 			ldo_entry_array[ldocounter].ldo_type);
 
-		dprintf(SPEW, "Setting %s\n",
-				ldo_entry_array[ldocounter].ldo_id);
+		dprintf(SPEW, "Setting %s(%u)\n",
+				ldo_entry_array[ldocounter].ldo_name, ldo_entry_array[ldocounter].ldo_id);
 
 		/* Set voltage during power on */
 		if (enable) {
@@ -164,7 +169,7 @@ int target_ldo_ctrl(uint8_t enable)
 
 bool target_display_panel_node(char *panel_name, char *pbuf, uint16_t buf_size)
 {
-	return gcdb_display_cmdline_arg(pbuf, buf_size);
+	return gcdb_display_cmdline_arg(panel_name, pbuf, buf_size);
 }
 
 void target_display_init(const char *panel_name)
@@ -178,12 +183,12 @@ void target_display_init(const char *panel_name)
 	}
 
 	do {
-		ret = gcdb_display_init(panel_name, MDP_REV_304, MIPI_FB_ADDR);
+		target_force_cont_splash_disable(false);
+		ret = gcdb_display_init(panel_name, MDP_REV_304, (void*)MIPI_FB_ADDR);
 		if (ret) {
 			/*Panel signature did not match, turn off the display*/
 			target_force_cont_splash_disable(true);
 			msm_display_off();
-			target_force_cont_splash_disable(false);
 		} else {
 			break;
 		}

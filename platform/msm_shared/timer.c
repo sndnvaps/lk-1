@@ -41,6 +41,8 @@
 #include <platform/interrupts.h>
 #include <kernel/thread.h>
 
+#include <platform/msm_shared/timer.h>
+
 #define GPT_ENABLE_CLR_ON_MATCH_EN        2
 #define GPT_ENABLE_EN                     1
 #define DGT_ENABLE_CLR_ON_MATCH_EN        2
@@ -50,7 +52,7 @@
 
 static platform_timer_callback timer_callback;
 static void *timer_arg;
-static time_t timer_interval;
+static lk_time_t timer_interval;
 
 static volatile uint32_t ticks;
 
@@ -62,7 +64,7 @@ static enum handler_return timer_irq(void *arg)
 
 status_t
 platform_set_periodic_timer(platform_timer_callback callback,
-			    void *arg, time_t interval)
+			    void *arg, lk_time_t interval)
 {
 	uint32_t tick_count = interval * platform_tick_rate() / 1000;
 
@@ -83,7 +85,7 @@ platform_set_periodic_timer(platform_timer_callback callback,
 	return 0;
 }
 
-time_t current_time(void)
+lk_time_t current_time(void)
 {
 	return ticks;
 }
@@ -103,6 +105,7 @@ void platform_uninit_timer(void)
 
 void mdelay(unsigned msecs)
 {
+	enter_critical_section();
 	msecs *= 33;
 
 	writel(0, GPT_CLEAR);
@@ -114,10 +117,12 @@ void mdelay(unsigned msecs)
 
 	writel(0, GPT_ENABLE);
 	writel(0, GPT_CLEAR);
+	exit_critical_section();
 }
 
 void udelay(unsigned usecs)
 {
+	enter_critical_section();
 	usecs = (usecs * 33 + 1000 - 33) / 1000;
 
 	writel(0, GPT_CLEAR);
@@ -129,10 +134,11 @@ void udelay(unsigned usecs)
 
 	writel(0, GPT_ENABLE);
 	writel(0, GPT_CLEAR);
+	exit_critical_section();
 }
 
 /* Return current time in micro seconds */
-bigtime_t current_time_hires(void)
+lk_bigtime_t current_time_hires(void)
 {
 	return ticks * 1000ULL;
 }

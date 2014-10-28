@@ -20,8 +20,7 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef __LIB_BIO_H
-#define __LIB_BIO_H
+#pragma once
 
 #include <sys/types.h>
 #include <list.h>
@@ -36,6 +35,7 @@ typedef struct bdev {
 	char *name;
 	off_t size;
 	size_t block_size;
+	size_t block_shift;
 	bnum_t block_count;
 
 	/* function pointers */
@@ -58,9 +58,6 @@ ssize_t bio_write_block(bdev_t *dev, const void *buf, bnum_t block, uint count);
 ssize_t bio_erase(bdev_t *dev, off_t offset, size_t len);
 int bio_ioctl(bdev_t *dev, int request, void *argp);
 
-/* intialize the block device layer */
-void bio_init(void);
-
 /* register a block device */
 void bio_register_device(bdev_t *dev);
 void bio_unregister_device(bdev_t *dev);
@@ -72,10 +69,15 @@ void bio_initialize_bdev(bdev_t *dev, const char *name, size_t block_size, bnum_
 void bio_dump_devices(void);
 
 /* subdevice support */
-status_t bio_publish_subdevice(const char *parent_dev, const char *subdev, bnum_t startblock, size_t len);
+status_t bio_publish_subdevice(const char *parent_dev, const char *subdev, bnum_t startblock, bnum_t block_count);
 
 /* memory based block device */
 int create_membdev(const char *name, void *ptr, size_t len);
 
-#endif
+/* helper routine to trim an offset + len to the device */
+size_t bio_trim_range(const bdev_t *dev, off_t offset, size_t len);
 
+/* helper routine to trim to a block range in the device */
+uint bio_trim_block_range(const bdev_t *dev, bnum_t block, uint count);
+
+// vim: set ts=4 sw=4 noexpandtab:

@@ -3,7 +3,6 @@
  * All rights reserved.
  *
  * Copyright (c) 2009-2013, The Linux Foundation. All rights reserved.
- * Copyright (c) 2011-2014, Xiaomi Corporation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +35,7 @@
 #include <splash.h>
 #include <platform.h>
 #include <string.h>
+#include <assert.h>
 
 #include "font5x12.h"
 
@@ -90,7 +90,7 @@ static void fbcon_drawglyph(uint16_t *pixels, uint16_t paint, unsigned stride,
 	}
 }
 
-static void fbcon_flush(void)
+void fbcon_flush(void)
 {
 	if (config->update_start)
 		config->update_start();
@@ -210,10 +210,10 @@ struct fbcon_config* fbcon_display(void)
 }
 
 
-extern struct fbimage* fetch_image_from_partition();
+extern struct fbimage* fetch_image_from_partition(void);
 void fbcon_putImage(struct fbimage *fbimg, bool flag);
 
-void display_image_on_screen()
+void display_image_on_screen(void)
 {
 	struct fbimage default_fbimg, *fbimg;
 	bool flag = true;
@@ -269,12 +269,15 @@ void fbcon_putImage(struct fbimage *fbimg, bool flag)
 		return;
 	}
 
-	if(fbimg) {
-		header = &fbimg->header;
-		width = pitch = header->width;
-		height = header->height;
-		logo_base = (unsigned char *)fbimg->image;
+	if(!fbimg) {
+		dprintf(CRITICAL,"fbimg is NULL!\n");
+		return;
 	}
+
+	header = &fbimg->header;
+	width = pitch = header->width;
+	height = header->height;
+	logo_base = (unsigned char *)fbimg->image;
 
 	total_x = config->width;
 	total_y = config->height;
@@ -315,7 +318,7 @@ void fbcon_putImage(struct fbimage *fbimg, bool flag)
 
 	fbcon_flush();
 
-#if defined(DISPLAY_MIPI_PANEL_NOVATEK_BLUE) || defined(DISPLAY_MIPI_PANEL_RENESAS_HT)
+#if DISPLAY_MIPI_PANEL_NOVATEK_BLUE
 	if(is_cmd_mode_enabled())
         mipi_dsi_cmd_mode_trigger();
 #endif

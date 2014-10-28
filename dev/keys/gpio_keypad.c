@@ -48,6 +48,7 @@
 
 #define LINUX_MACHTYPE_8660_QT      3298
 
+#if 0
 struct gpio_kp {
 	struct gpio_keypad_info *keypad_info;
 	struct timer timer;
@@ -56,6 +57,7 @@ struct gpio_kp {
 	unsigned int some_keys_pressed:2;
 	unsigned long keys_pressed[0];
 };
+#endif
 
 struct gpio_qwerty_kp {
 	struct qwerty_keypad_info *keypad_info;
@@ -67,6 +69,7 @@ struct gpio_qwerty_kp {
 
 static struct gpio_qwerty_kp *qwerty_keypad;
 /* TODO: Support multiple keypads? */
+#if 0
 static struct gpio_kp *keypad;
 
 static void check_output(struct gpio_kp *kp, int out, int polarity)
@@ -103,7 +106,7 @@ static void check_output(struct gpio_kp *kp, int out, int polarity)
 }
 
 static enum handler_return
-gpio_keypad_timer_func(struct timer *timer, time_t now, void *arg)
+gpio_keypad_timer_func(struct timer *timer, lk_time_t now, void *arg)
 {
 	struct gpio_kp *kp = keypad;
 	struct gpio_keypad_info *kpinfo = kp->keypad_info;
@@ -128,14 +131,14 @@ gpio_keypad_timer_func(struct timer *timer, time_t now, void *arg)
 		else
 			gpio_config(gpio, polarity ? GPIO_OUTPUT : 0);
 		timer_set_oneshot(timer, kpinfo->settle_time,
-				  gpio_keypad_timer_func, NULL);
+		                  gpio_keypad_timer_func, NULL);
 		goto done;
 	}
 
 	if (/*!kp->use_irq*/ 1 || kp->some_keys_pressed) {
 		event_signal(&kp->full_scan, false);
 		timer_set_oneshot(timer, kpinfo->poll_time,
-				  gpio_keypad_timer_func, NULL);
+		                  gpio_keypad_timer_func, NULL);
 		goto done;
 	}
 
@@ -155,7 +158,7 @@ void gpio_keypad_init(struct gpio_keypad_info *kpinfo)
 	key_count = kpinfo->ninputs * kpinfo->noutputs;
 
 	len = sizeof(struct gpio_kp) + (sizeof(unsigned long) *
-					BITMAP_NUM_WORDS(key_count));
+	                                BITMAP_NUM_WORDS(key_count));
 	keypad = malloc(len);
 	ASSERT(keypad);
 
@@ -163,7 +166,7 @@ void gpio_keypad_init(struct gpio_keypad_info *kpinfo)
 	keypad->keypad_info = kpinfo;
 
 	output_val = (!!(kpinfo->flags & GPIOKPF_ACTIVE_HIGH)) ^
-		     (!!(kpinfo->flags & GPIOKPF_DRIVE_INACTIVE));
+	             (!!(kpinfo->flags & GPIOKPF_DRIVE_INACTIVE));
 	output_cfg = kpinfo->flags & GPIOKPF_DRIVE_INACTIVE ? GPIO_OUTPUT : 0;
 	for (i = 0; i < kpinfo->noutputs; i++) {
 		gpio_set(kpinfo->output_gpios[i], output_val);
@@ -181,7 +184,7 @@ void gpio_keypad_init(struct gpio_keypad_info *kpinfo)
 	/* wait for the keypad to complete one full scan */
 	event_wait(&keypad->full_scan);
 }
-
+#endif
 int pm8058_gpio_config(int gpio, struct pm8058_gpio *param)
 {
 	int	rc;
@@ -312,7 +315,7 @@ static void ssbi_gpio_init(unsigned int mach_id)
 }
 
 static enum handler_return
-scan_qwerty_keypad(struct timer *timer, time_t now, void *arg)
+scan_qwerty_keypad(struct timer *timer, lk_time_t now, void *arg)
 {
     unsigned int rows = (qwerty_keypad->keypad_info)->rows;
     unsigned int columns = (qwerty_keypad->keypad_info)->columns;
@@ -359,7 +362,7 @@ scan_qwerty_keypad(struct timer *timer, time_t now, void *arg)
 }
 
 static enum handler_return
-scan_qt_keypad(struct timer *timer, time_t now, void *arg)
+scan_qt_keypad(struct timer *timer, lk_time_t now, void *arg)
 {
     unsigned int gpio;
     unsigned int last_state=0;
@@ -423,7 +426,7 @@ void ssbi_keypad_init(struct qwerty_keypad_info  *qwerty_kp)
 
     if(mach_id == LINUX_MACHTYPE_8660_QT)
     {
-        mdelay((qwerty_keypad->keypad_info)->settle_time);
+        spin((qwerty_keypad->keypad_info)->settle_time*1000);
 #ifdef QT_8660_KEYPAD_HW_BUG
         timer_set_oneshot(&qwerty_keypad->timer, 0, scan_qt_keypad, NULL);
 #endif
@@ -436,7 +439,7 @@ void ssbi_keypad_init(struct qwerty_keypad_info  *qwerty_kp)
 }
 
 static enum handler_return
-scan_qwerty_gpio_keypad(struct timer *timer, time_t now, void *arg)
+scan_qwerty_gpio_keypad(struct timer *timer, lk_time_t now, void *arg)
 {
 	int i=0;
 	int num =0;
@@ -461,7 +464,6 @@ scan_qwerty_gpio_keypad(struct timer *timer, time_t now, void *arg)
 		}
 	}
 
-done:
 	event_signal(&qwerty_keypad->full_scan, false);
 	return INT_RESCHEDULE;
 }

@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2008, Google Inc.
  * All rights reserved.
- * Copyright (c) 2009-2013, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2014, The Linux Foundation. All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -31,11 +31,13 @@
 #include <dev/flash.h>
 #include <lib/ptable.h>
 #include <debug.h>
+#include <assert.h>
 #include <string.h>
 #include <malloc.h>
 #include <sys/types.h>
 #include <platform.h>
 #include <platform/clock.h>
+#include <platform/iomap.h>
 
 static uint32_t nand_base;
 static struct ptable *flash_ptable;
@@ -66,6 +68,8 @@ static struct flash_id supported_flash[] = {
 	{0x1590AA2C,   0xFFFFFFFF,  0x10000000,    0,  2048,   0x00020000,        0xE0,   1},
 	{0x2690AC2C,   0xFFFFFFFF,  0x20000000,    0,  4096,   0x00040000,        0xE0,   1},
 	{0x1590ACAD,   0xFFFFFFFF,  0x20000000,    0,  2048,   0x00020000,        0x80,   0},
+	{0x9590DC2C,   0xFFFFFFFF,  0x10000000,    0,  2048,   0x00020000,        0x40,   0},
+	{0x1590aa98,   0xFFFFFFFF,  0x10000000,    0,  2048,   0x00020000,        0x80,   1},
 	/* Note: Width flag is 0 for 8 bit Flash and 1 for 16 bit flash   */
 };
 
@@ -892,7 +896,6 @@ qpic_nand_blk_erase(uint32_t page)
 	uint32_t status;
 	int num_desc = 0;
 	uint32_t blk_addr = page / flash.num_pages_per_blk;
-	int nand_ret;
 
 	/* Erase only if the block is not bad */
 	if (qpic_nand_block_isbad(page))
@@ -951,7 +954,7 @@ qpic_nand_blk_erase(uint32_t page)
 	status = qpic_nand_check_status(status);
 
 	/* Dummy read to unlock pipe. */
-	nand_ret = qpic_nand_read_reg(NAND_FLASH_STATUS, BAM_DESC_UNLOCK_FLAG, cmd_list_ptr);
+	qpic_nand_read_reg(NAND_FLASH_STATUS, BAM_DESC_UNLOCK_FLAG, cmd_list_ptr);
 
 	/* Check for status errors*/
 	if (status)
@@ -1250,7 +1253,6 @@ void
 qpic_nand_init(struct qpic_nand_init_config *config)
 {
 	uint32_t i;
-	int nand_ret;
 
 	nand_base = config->nand_base;
 
@@ -1322,7 +1324,7 @@ flash_get_ptable(void)
 }
 
 void
-qpic_nand_uninit()
+qpic_nand_uninit(void)
 {
 	bam_pipe_reset(&bam, DATA_PRODUCER_PIPE_INDEX);
 	bam_pipe_reset(&bam, DATA_CONSUMER_PIPE_INDEX);
@@ -1356,7 +1358,6 @@ qpic_nand_read_page(uint32_t page, unsigned char* buffer, unsigned char* sparead
 	uint8_t flags = 0;
 	uint32_t *cmd_list_temp = NULL;
 
-	uint32_t temp_status = 0;
 	/* UD bytes in last CW is 512 - cws_per_page *4.
 	 * Since each of the CW read earlier reads 4 spare bytes.
 	 */
@@ -1423,14 +1424,14 @@ qpic_nand_read_page(uint32_t page, unsigned char* buffer, unsigned char* sparead
 			bam_add_one_desc(&bam,
 							 DATA_PRODUCER_PIPE_INDEX,
 							 (unsigned char *)PA((addr_t)buffer),
-							 ud_bytes_in_last_cw,
+							 (uint32_t)ud_bytes_in_last_cw,
 							 0);
 			num_data_desc++;
 
 			bam_add_one_desc(&bam,
 							 DATA_PRODUCER_PIPE_INDEX,
 							 (unsigned char *)PA((addr_t)spareaddr),
-							 oob_bytes,
+							 (uint32_t)oob_bytes,
 							 BAM_DESC_INT_FLAG);
 			num_data_desc++;
 
@@ -1471,7 +1472,7 @@ qpic_nand_read_page(uint32_t page, unsigned char* buffer, unsigned char* sparead
 
 		bam_add_cmd_element(cmd_list_ptr, NAND_FLASH_STATUS, (uint32_t)PA((addr_t)&(flash_sts[i])), CE_READ_TYPE);
 
-		cmd_list_temp = cmd_list_ptr;
+		cmd_list_temp = (uint32_t*)cmd_list_ptr;
 
 		cmd_list_ptr++;
 
@@ -1638,7 +1639,7 @@ flash_erase(struct ptentry *ptn)
 }
 
 int
-flash_ecc_bch_enabled()
+flash_ecc_bch_enabled(void)
 {
 	return (flash.ecc_width == NAND_WITH_4_BIT_ECC)? 0 : 1;
 }
@@ -1757,4 +1758,9 @@ flash_write(struct ptentry *ptn,
 
 	dprintf(INFO, "flash_write_image: success\n");
 	return 0;
+}
+
+uint32_t nand_device_base()
+{
+	return nand_base;
 }

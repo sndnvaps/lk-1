@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Travis Geiselbrecht
+ * Copyright (c) 2008-2013 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -22,17 +22,24 @@
  */
 #include <stdlib.h>
 #include <debug.h>
+#include <trace.h>
 #include <pow2.h>
 #include <string.h>
+#include <assert.h>
 #include <lib/cbuf.h>
 #include <kernel/event.h>
 
 #define LOCAL_TRACE 0
 
 #define INC_POINTER(cbuf, ptr, inc) \
-	modpow2(((ptr) + (inc)), (cbuf)->len_pow2)
+    modpow2(((ptr) + (inc)), (cbuf)->len_pow2)
 
 void cbuf_initialize(cbuf_t *cbuf, size_t len)
+{
+	cbuf_initialize_etc(cbuf, len, malloc(len));
+}
+
+void cbuf_initialize_etc(cbuf_t *cbuf, size_t len, void *buf)
 {
 	DEBUG_ASSERT(cbuf);
 	DEBUG_ASSERT(len > 0);
@@ -40,16 +47,22 @@ void cbuf_initialize(cbuf_t *cbuf, size_t len)
 
 	cbuf->head = 0;
 	cbuf->tail = 0;
-	cbuf->len_pow2 = log2(len);
-	cbuf->buf = malloc(len);
+	cbuf->len_pow2 = log2_uint(len);
+	cbuf->buf = buf;
 	event_init(&cbuf->event, false, 0);
 
 	LTRACEF("len %zd, len_pow2 %u\n", len, cbuf->len_pow2);
 }
 
-static size_t cbuf_space_avail(cbuf_t *cbuf)
+size_t cbuf_space_avail(cbuf_t *cbuf)
 {
-	return (cbuf->head + valpow2(cbuf->len_pow2) - cbuf->tail - 1);
+	uint consumed = modpow2((uint)(cbuf->head - cbuf->tail), cbuf->len_pow2);
+	return valpow2(cbuf->len_pow2) - consumed - 1;
+}
+
+size_t cbuf_space_used(cbuf_t *cbuf)
+{
+	return modpow2((uint)(cbuf->head - cbuf->tail), cbuf->len_pow2);
 }
 
 size_t cbuf_write(cbuf_t *cbuf, const void *_buf, size_t len, bool canreschedule)
@@ -95,7 +108,6 @@ size_t cbuf_write(cbuf_t *cbuf, const void *_buf, size_t len, bool canreschedule
 
 size_t cbuf_read(cbuf_t *cbuf, void *_buf, size_t buflen, bool block)
 {
-	size_t ret;
 	char *buf = (char *)_buf;
 
 	DEBUG_ASSERT(cbuf);
@@ -107,6 +119,7 @@ size_t cbuf_read(cbuf_t *cbuf, void *_buf, size_t buflen, bool block)
 		event_wait(&cbuf->event);
 
 	// see if there's data available
+	size_t ret = 0;
 	if (cbuf->tail != cbuf->head) {
 		size_t pos = 0;
 
@@ -134,9 +147,58 @@ size_t cbuf_read(cbuf_t *cbuf, void *_buf, size_t buflen, bool block)
 		}
 
 		ret = pos;
-	} else {
-		DEBUG_ASSERT(!block);
-		ret = 0;
+	}
+
+	exit_critical_section();
+
+	return ret;
+}
+
+size_t cbuf_write_char(cbuf_t *cbuf, char c, bool canreschedule)
+{
+	DEBUG_ASSERT(cbuf);
+
+	enter_critical_section();
+
+	size_t ret = 0;
+	if (cbuf_space_avail(cbuf) > 0) {
+		cbuf->buf[cbuf->head] = c;
+
+		cbuf->head = INC_POINTER(cbuf, cbuf->head, 1);
+		ret = 1;
+
+		if (cbuf->head != cbuf->tail)
+			event_signal(&cbuf->event, canreschedule);
+	}
+
+	exit_critical_section();
+
+	return ret;
+}
+
+size_t cbuf_read_char(cbuf_t *cbuf, char *c, bool block)
+{
+	DEBUG_ASSERT(cbuf);
+	DEBUG_ASSERT(c);
+
+	enter_critical_section();
+
+	if (block)
+		event_wait(&cbuf->event);
+
+	// see if there's data available
+	size_t ret = 0;
+	if (cbuf->tail != cbuf->head) {
+
+		*c = cbuf->buf[cbuf->tail];
+		cbuf->tail = INC_POINTER(cbuf, cbuf->tail, 1);
+
+		if (cbuf->tail == cbuf->head) {
+			// we've emptied the buffer, unsignal the event
+			event_unsignal(&cbuf->event);
+		}
+
+		ret = 1;
 	}
 
 	exit_critical_section();

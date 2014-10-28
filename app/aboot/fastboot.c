@@ -29,17 +29,24 @@
  */
 
 #include <debug.h>
+#include <assert.h>
 #include <string.h>
 #include <stdlib.h>
+#include <printf.h>
 #include <platform.h>
 #include <target.h>
 #include <kernel/thread.h>
 #include <kernel/event.h>
 #include <dev/udc.h>
+#include <app/aboot.h>
 #include "fastboot.h"
 
 #ifdef USB30_SUPPORT
 #include <usb30_udc.h>
+#endif
+
+#if WITH_APP_DISPLAY_SERVER
+#include <app/display_server.h>
 #endif
 
 typedef struct
@@ -287,7 +294,7 @@ static int hsusb_usb_read(void *_buf, unsigned len)
 
 	while (len > 0) {
 		xfer = (len > MAX_USBFS_BULK_SIZE) ? MAX_USBFS_BULK_SIZE : len;
-		req->buf = PA((addr_t)buf);
+		req->buf = (void*) PA((addr_t)buf);
 		req->length = xfer;
 		req->complete = req_complete;
 		r = udc_request_queue(out, req);
@@ -313,7 +320,7 @@ static int hsusb_usb_read(void *_buf, unsigned len)
 	 * Force reload of buffer from memory
 	 * since transaction is complete now.
 	 */
-	arch_invalidate_cache_range(_buf, count);
+	arch_invalidate_cache_range((addr_t)_buf, count);
 	return count;
 
 oops:
@@ -333,7 +340,7 @@ static int hsusb_usb_write(void *buf, unsigned len)
 
 	while (len > 0) {
 		xfer = (len > MAX_USBFS_BULK_SIZE) ? MAX_USBFS_BULK_SIZE : len;
-		req->buf = PA((addr_t)_buf);
+		req->buf = (void*) PA((addr_t)_buf);
 		req->length = xfer;
 		req->complete = req_complete;
 		r = udc_request_queue(in, req);
@@ -362,9 +369,10 @@ oops:
 	return -1;
 }
 
-void fastboot_ack(const char *code, const char *reason)
+static void fastboot_ack(const char *code, const char *reason)
 {
-	STACKBUF_DMA_ALIGN(response, MAX_RSP_SIZE);
+	STACKBUF_DMA_ALIGN(__response, MAX_RSP_SIZE);
+	char* response = (char*)__response;
 
 	if (fastboot_state != STATE_COMMAND)
 		return;
@@ -379,9 +387,26 @@ void fastboot_ack(const char *code, const char *reason)
 
 }
 
+void fastboot_code(const char *code, const char *reason)
+{
+	STACKBUF_DMA_ALIGN(__response, MAX_RSP_SIZE);
+	char* response = (char*)__response;
+
+	if (fastboot_state != STATE_COMMAND)
+		return;
+
+	if (reason == 0)
+		reason = "";
+
+	snprintf(response, MAX_RSP_SIZE, "%s%s", code, reason);
+
+	usb_if.usb_write(response, strlen(response));
+}
+
 void fastboot_info(const char *reason)
 {
-	STACKBUF_DMA_ALIGN(response, MAX_RSP_SIZE);
+	STACKBUF_DMA_ALIGN(__response, MAX_RSP_SIZE);
+	char* response = (char*)__response;
 
 	if (fastboot_state != STATE_COMMAND)
 		return;
@@ -392,6 +417,45 @@ void fastboot_info(const char *reason)
 	snprintf(response, MAX_RSP_SIZE, "INFO%s", reason);
 
 	usb_if.usb_write(response, strlen(response));
+}
+
+void fastboot_write(void *data, unsigned len)
+{
+	STACKBUF_DMA_ALIGN(__response, MAX_RSP_SIZE);
+	char* response = (char*)__response;
+
+	if (fastboot_state != STATE_COMMAND)
+		return;
+
+	if (!data)
+		return;
+
+	snprintf(response, MAX_RSP_SIZE, "PRNT");
+	memcpy(response+4, data, len);
+
+	usb_if.usb_write(response, len+4);
+}
+
+void fastboot_send_data(void *data, unsigned len)
+{
+	STACKBUF_DMA_ALIGN(__response, MAX_RSP_SIZE);
+	char* response = (char*)__response;
+
+	if (fastboot_state != STATE_COMMAND)
+		return;
+
+	if (!data)
+		return;
+
+	// exit command mode
+	fastboot_code("OKAY", "");
+
+	// send header
+	snprintf(response, MAX_RSP_SIZE, "DATA%016x", len);
+	usb_if.usb_write(response, 20);
+
+	// send data
+	usb_if.usb_write(data, len);
 }
 
 void fastboot_fail(const char *reason)
@@ -449,7 +513,8 @@ static void cmd_help(const char *arg, void *data, unsigned sz)
 
 static void cmd_download(const char *arg, void *data, unsigned sz)
 {
-	STACKBUF_DMA_ALIGN(response, MAX_RSP_SIZE);
+	STACKBUF_DMA_ALIGN(__response, MAX_RSP_SIZE);
+	char* response = (char*)__response;
 	unsigned len = hex2unsigned(arg);
 	int r;
 
@@ -504,8 +569,16 @@ again:
 		for (cmd = cmdlist; cmd; cmd = cmd->next) {
 			if (memcmp(buffer, cmd->prefix, cmd->prefix_len))
 				continue;
+
+#if WITH_APP_DISPLAY_SERVER
+			display_server_pause();
+#endif
 			cmd->handle((const char*) buffer + cmd->prefix_len,
 				    (void*) download_base, download_size);
+#if WITH_APP_DISPLAY_SERVER
+			display_server_unpause();
+#endif
+
 			if (fastboot_state == STATE_COMMAND)
 				fastboot_fail("unknown reason");
 			goto again;
@@ -619,7 +692,7 @@ int fastboot_init(void *base, unsigned size)
 	fastboot_register("oem help", cmd_help);
 	fastboot_register("getvar:", cmd_getvar);
 	fastboot_register("download:", cmd_download);
-	fastboot_publish("version", "0.5");
+	fastboot_publish("version", ABOOT_VERSION);
 
 	thr = thread_create("fastboot", fastboot_handler, 0, DEFAULT_PRIORITY, 4096);
 	if (!thr)
